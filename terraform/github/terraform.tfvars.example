@@ -1,0 +1,2 @@
+# Copy to terraform.tfvars, which is git-ignored.
+owner = "your-github-account"

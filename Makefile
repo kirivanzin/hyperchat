@@ -1,5 +1,5 @@
 # Every operation this repository supports, in the order it happens:
-#   registry -> login -> build -> push.  `make help` lists them.
+#   github -> registry -> login -> build -> push.  `make help` lists them.
 #
 # The image tag is the commit, not "dev", and the registry refuses to overwrite a tag
 # (docker_config.immutable_tags in terraform/registry). Two things follow, both intended: pushing the
@@ -13,9 +13,13 @@ REPOSITORY ?= hyperchat
 PORT       ?= 8080
 
 TERRAFORM = terraform -chdir=terraform/registry
+TERRAFORM_GITHUB = terraform -chdir=terraform/github
+BRANCH ?= main
 # The project is read from the applied registry root rather than repeated here. Two places holding
 # the same identifier is how an image ends up in a registry that nothing reads.
 PROJECT ?= $(shell $(TERRAFORM) output -raw project 2>/dev/null)
+# And the repository comes from the applied GitHub root, for the same reason.
+FULL_NAME ?= $(shell $(TERRAFORM_GITHUB) output -raw full_name 2>/dev/null)
 
 REGISTRY = $(REGION)-docker.pkg.dev/$(PROJECT)/$(REPOSITORY)
 LOCAL    = $(IMAGE):$(TAG)
@@ -44,6 +48,38 @@ run: ## Run the image on PORT, in the foreground
 
 stop: ## Stop the running container
 	@docker stop $(IMAGE) 2>/dev/null || true
+
+github-plan: ## Show what the GitHub root creates, without creating it
+	$(TERRAFORM_GITHUB) init -input=false
+	$(TERRAFORM_GITHUB) plan -input=false
+
+github-create: ## Create the repository, so there is somewhere to push
+	$(TERRAFORM_GITHUB) init -input=false
+	$(TERRAFORM_GITHUB) apply -input=false -target=github_repository.repo
+
+github-remote: ## Point origin at the repository this root created
+	@[ -n "$(FULL_NAME)" ] || { \
+		echo "FULL_NAME is unset: no applied state in terraform/github."; \
+		echo "run 'make github-create' once, or pass FULL_NAME=owner/name"; \
+		exit 1; }
+	@git remote get-url origin >/dev/null 2>&1 \
+		&& git remote set-url origin "$$($(TERRAFORM_GITHUB) output -raw ssh_clone_url)" \
+		|| git remote add origin "$$($(TERRAFORM_GITHUB) output -raw ssh_clone_url)"
+
+github-apply: ## Apply the rest, so branch protection lands once the branch exists
+	$(TERRAFORM_GITHUB) init -input=false
+	$(TERRAFORM_GITHUB) apply -input=false
+
+github-verify: ## Show the repository settings and the protection that exist
+	@[ -n "$(FULL_NAME)" ] || { \
+		echo "FULL_NAME is unset: no applied state in terraform/github."; \
+		echo "run 'make github-create' once, or pass FULL_NAME=owner/name"; \
+		exit 1; }
+	@gh api /repos/$(FULL_NAME) >/dev/null && echo "repository $(FULL_NAME) exists"
+	@gh api /repos/$(FULL_NAME) \
+		--jq '{visibility, security: (.security_and_analysis | map_values(.status))}'
+	@gh api /repos/$(FULL_NAME)/branches/$(BRANCH)/protection \
+		--jq '{admins: .enforce_admins.enabled, force_push: .allow_force_pushes.enabled, deletion: .allow_deletions.enabled, reviews: .required_pull_request_reviews, checks: .required_status_checks}'
 
 registry-plan: ## Show what the registry root creates, without creating it
 	$(TERRAFORM) init -input=false

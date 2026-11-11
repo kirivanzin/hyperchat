@@ -10,7 +10,22 @@ still true when there are fifty of them. No service runs yet.
 | `src/hyperchat/main.py` | The app: `uvicorn hyperchat.main:api`. One route. |
 | `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, no cache reused across builds. |
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
+| `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | The Artifact Registry repository. Applied once. |
+| `docs/repository-as-code.md` | What provisioning the repository costs, and why the token is not in CI. |
+
+## Creating the repository
+
+```sh
+make github-plan            # what would be created, and nothing created
+make github-create          # the repository itself, so there is somewhere to push
+make github-remote          # point origin at it
+git push -u origin main
+make github-apply           # branch protection, now that main exists
+```
+
+Two applies rather than one, because protection attaches to a branch and the branch does not exist
+until something is pushed. `docs/repository-as-code.md` records that and the credential it needs.
 
 ## Getting an image into the registry
 
