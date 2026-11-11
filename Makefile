@@ -27,6 +27,9 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 
 .DEFAULT_GOAL := help
 
+.PHONY: help info test build run stop github github-plan github-create github-remote \
+        github-apply github-verify registry-plan registry-apply login push registry-verify
+
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -49,6 +52,22 @@ run: ## Run the image on PORT, in the foreground
 stop: ## Stop the running container
 	@docker stop $(IMAGE) 2>/dev/null || true
 
+github: ## Create the repository, point origin at it, push, then protect the branch
+	@[ -n "$$GITHUB_TOKEN" ] || { \
+		echo "GITHUB_TOKEN is unset: the GitHub provider authenticates with it." >&2; \
+		echo "see docs/repository-as-code.md for what that token can do" >&2; \
+		exit 1; }
+	@[ -z "$$(git status --porcelain)" ] || { \
+		echo "uncommitted changes: nothing publishes them, and they are easy to lose" >&2; \
+		echo "commit them first, then run this again" >&2; \
+		git status --short; \
+		exit 1; }
+	@echo "== repository"; $(MAKE) --no-print-directory github-create
+	@echo "== origin"; $(MAKE) --no-print-directory github-remote
+	@echo "== first push"; git push -u origin $(BRANCH)
+	@echo "== protection"; $(MAKE) --no-print-directory github-apply
+	@echo "== published: $$($(TERRAFORM_GITHUB) output -raw html_url)"
+
 github-plan: ## Show what the GitHub root creates, without creating it
 	$(TERRAFORM_GITHUB) init -input=false
 	$(TERRAFORM_GITHUB) plan -input=false
@@ -59,8 +78,8 @@ github-create: ## Create the repository, so there is somewhere to push
 
 github-remote: ## Point origin at the repository this root created
 	@[ -n "$(FULL_NAME)" ] || { \
-		echo "FULL_NAME is unset: no applied state in terraform/github."; \
-		echo "run 'make github-create' once, or pass FULL_NAME=owner/name"; \
+		echo "FULL_NAME is unset: no applied state in terraform/github." >&2; \
+		echo "run 'make github-create' once, or pass FULL_NAME=owner/name" >&2; \
 		exit 1; }
 	@git remote get-url origin >/dev/null 2>&1 \
 		&& git remote set-url origin "$$($(TERRAFORM_GITHUB) output -raw ssh_clone_url)" \
@@ -72,8 +91,8 @@ github-apply: ## Apply the rest, so branch protection lands once the branch exis
 
 github-verify: ## Show the repository settings and the protection that exist
 	@[ -n "$(FULL_NAME)" ] || { \
-		echo "FULL_NAME is unset: no applied state in terraform/github."; \
-		echo "run 'make github-create' once, or pass FULL_NAME=owner/name"; \
+		echo "FULL_NAME is unset: no applied state in terraform/github." >&2; \
+		echo "run 'make github-create' once, or pass FULL_NAME=owner/name" >&2; \
 		exit 1; }
 	@gh api /repos/$(FULL_NAME) >/dev/null && echo "repository $(FULL_NAME) exists"
 	@gh api /repos/$(FULL_NAME) \
@@ -94,16 +113,16 @@ login: ## Authorise docker for the registry host, as your own gcloud identity
 
 push: ## Tag and push the image for this commit
 	@[ -n "$(PROJECT)" ] || { \
-		echo "PROJECT is unset: there is no applied state in terraform/registry."; \
-		echo "run 'make registry-apply' once, or pass PROJECT=<id>"; \
+		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
+		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
 		exit 1; }
 	docker tag $(LOCAL) $(REMOTE)
 	docker push $(REMOTE)
 
 registry-verify: ## Show the registry that exists, and the policy that guards it
 	@[ -n "$(PROJECT)" ] || { \
-		echo "PROJECT is unset: there is no applied state in terraform/registry."; \
-		echo "run 'make registry-apply' once, or pass PROJECT=<id>"; \
+		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
+		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
 		exit 1; }
 	@gcloud artifacts repositories describe $(REPOSITORY) \
 		--location=$(REGION) --project=$(PROJECT) \

@@ -17,15 +17,22 @@ still true when there are fifty of them. No service runs yet.
 ## Creating the repository
 
 ```sh
-make github-plan            # what would be created, and nothing created
+make github                 # create, point origin, push, protect
+```
+
+which is the four steps below, in order, each printed as it runs so a failure says which half you
+are in:
+
+```sh
 make github-create          # the repository itself, so there is somewhere to push
 make github-remote          # point origin at it
 git push -u origin main
 make github-apply           # branch protection, now that main exists
 ```
 
-Two applies rather than one, because protection attaches to a branch and the branch does not exist
-until something is pushed. `docs/repository-as-code.md` records that and the credential it needs.
+Two applies and not one, because protection attaches to a branch and a branch is a pointer to a
+commit that does not exist until something is pushed. `docs/repository-as-code.md` records that,
+and the credential it needs.
 
 ## Getting an image into the registry
 
