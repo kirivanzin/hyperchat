@@ -15,14 +15,13 @@ RUN useradd --create-home --uid 10001 app
 
 WORKDIR /app
 
-# Copied separately from the source so a change to a route does not reinstall the dependencies.
+# Dependencies first, without the project: `uv sync` also installs the project, and the project
+# needs `src/`, so the split only holds with --no-install-project. Without it this layer is a
+# dependency layer that secretly depends on the source, which is to say not a layer at all.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
-
-# The project is installed straight after the source arrives, so the layer above stays a dependency
-# layer and this one is the only thing that changes when the code does.
 RUN uv sync --frozen --no-dev
 
 USER app
