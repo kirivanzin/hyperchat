@@ -1,0 +1,33 @@
+.venv/
+__pycache__/
+*.py[oc]
+*.egg-info/
+dist/
+build/
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Terraform state is local and never belongs in a repository. `terraform init` also writes
+# .terraform/, and a .tfvars carries the project id, which is the one identifier this repository
+# deliberately does not contain.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+terraform.tfvars
+
+# Secrets and keys: none exist yet, and these are here so the day one appears it is not committed
+# by accident.
+*.env
+*.env.*
+!.env.example
+*.pem
+*.key
+
+.DS_Store
+.zed/

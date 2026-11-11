@@ -1,0 +1,27 @@
+# The build context. Everything here is either a secret, a local artefact, or infra that has no
+# business inside a container. README.md is deliberately NOT excluded: pyproject.toml declares
+# readme = "README.md" and the build backend reads it while installing the package.
+.venv
+.git
+.gitignore
+.gitattributes
+__pycache__
+*.py[oc]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+.coverage.*
+htmlcov
+terraform/
+tests/
+*.env
+*.env.*
+*.pem
+*.key
+*.tfstate
+*.tfstate.*
+Makefile
+Dockerfile
+.dockerignore
