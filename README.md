@@ -89,7 +89,9 @@ PROVIDER_MAX_TOKENS=5 MESSAGE='Count from one to fifty.' make chat
 `make chat` runs the same `graph` object the endpoint awaits — no HTTP, no token — because a debugging
 tool that is a second implementation is a tool that drifts. It needs `PROVIDER_API_KEY` in `.env`; the
 endpoint answers **503** when that is absent (the model is off, not broken) and **502** when the
-provider fails, with the reason logged and not returned.
+provider fails, with the reason logged and not returned. An empty reply is a 502 as well: a 200 with
+no text is indistinguishable from a truncation, and the log carries `finish_reason` so the operator
+can tell a cap set too low from a provider anomaly.
 
 ## The decisions worth knowing
 

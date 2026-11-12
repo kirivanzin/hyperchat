@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_deepseek import ChatDeepSeek
 
 from hyperchat import agent, chat
@@ -182,6 +184,53 @@ def test_an_over_long_message_is_rejected_before_the_model(caller, monkeypatch):
 
     assert response.status_code == 422
     assert seen == []
+
+
+def test_an_empty_reply_is_an_EmptyReply_that_names_the_finish_reason(monkeypatch):
+    class Empty:
+        async def ainvoke(self, *_args: object, **_kwargs: object) -> AIMessage:
+            return AIMessage(content="", response_metadata={"finish_reason": "length"})
+
+    monkeypatch.setattr(agent, "_model", Empty())
+
+    with pytest.raises(agent.EmptyReply) as caught:
+        asyncio.run(agent.call_model({"messages": [HumanMessage("hi")]}, {}))
+
+    assert isinstance(caught.value, ProviderFailed)
+    assert str(caught.value) == "provider returned no content (finish_reason=length)"
+
+
+def test_an_empty_reply_is_502_like_any_provider_failure(caller, monkeypatch, caplog):
+    class Empty:
+        async def ainvoke(self, *_args: object, **_kwargs: object) -> AIMessage:
+            return AIMessage(content="", response_metadata={"finish_reason": "content_filter"})
+
+    monkeypatch.setattr(agent, "_model", Empty())
+
+    with caplog.at_level(logging.ERROR, logger="hyperchat"):
+        response = client.post("/api/chat", json={"message": "hi"})
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "the model provider failed"
+    assert "provider returned no content (finish_reason=content_filter)" in caplog.text, (
+        "the log must name the finish_reason; an EmptyReply without it is a rename"
+    )
+
+
+def test_a_reply_with_text_blocks_is_not_empty(monkeypatch):
+    # `content` can be a list of blocks, so a truthiness check on the whole value would call this
+    # reply empty and turn a real answer into a 502.
+    blocks = [{"type": "text", "text": "ok"}]
+
+    class Reply:
+        async def ainvoke(self, *_args: object, **_kwargs: object) -> AIMessage:
+            return AIMessage(content=blocks, response_metadata={"finish_reason": "stop"})
+
+    monkeypatch.setattr(agent, "_model", Reply())
+
+    result = asyncio.run(agent.call_model({"messages": [HumanMessage("hi")]}, {}))
+
+    assert result["messages"][0].content == blocks
 
 
 # --- the client lifetime --------------------------------------------------------------------------

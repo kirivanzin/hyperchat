@@ -41,6 +41,16 @@ class ProviderFailed(Exception):
     """The provider failed. The reason is for the log, never for the caller."""
 
 
+class EmptyReply(ProviderFailed):
+    """The provider answered, but with no usable text.
+
+    A subclass rather than a second status: both call sites already catch `ProviderFailed`, so this
+    is a 502 for the caller and exit 4 for the CLI without another handler. The distinction belongs
+    in the log, where `finish_reason` says who can fix it: `length` means our cap is too low,
+    `content_filter` means the provider refused, and `stop` with no content is a provider anomaly.
+    """
+
+
 _model: ChatDeepSeek | None = None
 
 
@@ -94,7 +104,32 @@ async def call_model(state: MessagesState, config: RunnableConfig) -> dict[str, 
         # returning, or logging, anything about the prompt.
         raise ProviderFailed(f"{type(exc).__name__}: {exc}") from exc
 
+    # A 200 with an empty answer is indistinguishable from a truncation, so it is a failure. The
+    # check is after the provider boundary so the subclass keeps its type instead of being rewrapped.
+    if not _has_text(reply.content):
+        reason = (getattr(reply, "response_metadata", None) or {}).get("finish_reason") or "unknown"
+        raise EmptyReply(f"provider returned no content (finish_reason={reason})")
+
     return {"messages": [reply]}
+
+
+def _has_text(content: Any) -> bool:
+    """Whether a reply contains any non-empty text.
+
+    `content` is a string for the common case, but providers can return a list of content blocks.
+    An empty string, an empty list, or blocks with no text carry no answer; a text block does.
+    """
+    if isinstance(content, str):
+        return bool(content)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, str) and block:
+                return True
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str) and text:
+                    return True
+    return False
 
 
 _builder = StateGraph(MessagesState)
