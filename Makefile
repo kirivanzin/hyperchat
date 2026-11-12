@@ -258,14 +258,13 @@ deploy-secret: ## Create the provider secret and runtime grant, without touching
 		-target=google_secret_manager_secret_iam_member.runtime_accessor
 	@echo "next: make deploy-secret-value, then make deploy"
 
-deploy-secret-value: ## Add PROVIDER_API_KEY from .env as a new secret version (needs gcloud)
+deploy-secret-value: ## Add the provider key from outside the checkout as a new secret version (needs gcloud)
 	@[ -n "$(PROJECT)" ] || { \
 		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
 		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
 		exit 1; }
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-		[ -n "$$PROVIDER_API_KEY" ] || { \
-			echo "PROVIDER_API_KEY is unset in .env: nothing to add." >&2; \
+	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
+			echo "PROVIDER_API_KEY is unset: put it in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
 		printf '%s' "$$PROVIDER_API_KEY" | gcloud secrets versions add $(SECRET) \
 			--project=$(PROJECT) --data-file=-
@@ -288,4 +287,4 @@ smoke: ## Assert the deployed probes and both auth directions (needs gcloud for 
 		echo "APP_URL is unset: there is no applied state in terraform/app." >&2; \
 		echo "run 'make deploy' once, or pass APP_URL=<url>" >&2; \
 		exit 1; }
-	@set -a; [ -f .env ] && . ./.env; set +a; scripts/smoke.sh "$(APP_URL)"
+	@$(LOCAL_ENV); scripts/smoke.sh "$(APP_URL)"

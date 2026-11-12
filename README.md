@@ -75,7 +75,7 @@ to start while the previous revision keeps serving — a deploy that appears to 
 
 ```sh
 make deploy-secret         # secret container, runtime account and its one grant
-make deploy-secret-value   # PROVIDER_API_KEY from .env, through stdin
+make deploy-secret-value   # the provider key from ~/.config/hyperchat/agent-deepseek.token
 make deploy                # the service, probes, and allUsers invoker
 make smoke                 # /, /livez, /readyz, and /api/me without and with a token
 ```
@@ -115,11 +115,12 @@ PROVIDER_MAX_TOKENS=5 MESSAGE='Count from one to fifty.' make chat
 ```
 
 `make chat` runs the same `graph` object the endpoint awaits — no HTTP, no token — because a debugging
-tool that is a second implementation is a tool that drifts. It needs `PROVIDER_API_KEY` in `.env`; the
-endpoint answers **503** when that is absent (the model is off, not broken) and **502** when the
-provider fails, with the reason logged and not returned. An empty reply is a 502 as well: a 200 with
-no text is indistinguishable from a truncation, and the log carries `finish_reason` so the operator
-can tell a cap set too low from a provider anomaly.
+tool that is a second implementation is a tool that drifts. It reads the provider key from
+`~/.config/hyperchat/agent-deepseek.token`, or from `PROVIDER_API_KEY` if that is already in the
+environment; the endpoint answers **503** when neither exists (the model is off, not broken) and
+**502** when the provider fails, with the reason logged and not returned. An empty reply is a 502 as
+well: a 200 with no text is indistinguishable from a truncation, and the log carries `finish_reason`
+so the operator can tell a cap set too low from a provider anomaly.
 
 ## The decisions worth knowing
 
@@ -147,7 +148,9 @@ git-ignored `.env` and never written to state.
 
 **`allUsers` may invoke the service.** The allowlist is the gate, not IAM, matching the audience
 decision above. The consequence is that the allowlist and the per-subject bounds are the only things
-between a public endpoint and spend; concurrency is pinned in `terraform/app/main.tf` for that reason.
+between a public endpoint and spend; `terraform/app/main.tf` pins concurrency at four per instance and
+scale-out at one instance, so the total is four simultaneous provider calls rather than four times
+Cloud Run's default instance count.
 
 **Nothing secret is in the image.** The provider key lives in Secret Manager and is a runtime
 reference, not a build input. `.dockerignore` and `.gitignore` both name `*.env`, `*.pem` and

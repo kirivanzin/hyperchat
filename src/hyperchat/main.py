@@ -78,6 +78,9 @@ async def livez() -> dict[str, int | str]:
     return {"status": "ok", "pid": os.getpid()}
 
 
+# Both the startup and readiness probes call this route. It must read only cached state and never call
+# the provider: a provider outage here would drain every instance from traffic rather than restart one,
+# which is the opposite of what liveness is for.
 @api.get("/readyz")
 def readyz() -> dict[str, str]:
     """Readiness: the trust boundary cached at import, never a provider call.

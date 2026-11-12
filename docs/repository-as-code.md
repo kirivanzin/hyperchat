@@ -117,7 +117,10 @@ bucket without versioning would cost. A machine that has the variables but not t
 checkout after losing the file, or the second operator below — plans to create everything, and
 applying that plan fails against resources that already exist. A bare clone does not reach it: it
 stops at `No value for required variable`, because the variables are in the git-ignored tfvars. That
-is a louder failure and the wrong reason to rely on.
+is a louder failure and the wrong reason to rely on. Because the service has
+`deletion_protection = true`, a lost state file also leaves it undeletable by Terraform and by
+`gcloud run services delete`; the escape is
+`gcloud run services update <service> --region=<region> --no-deletion-protection` first, then delete.
 
 The trigger to revisit is named so it is not a matter of mood:
 

@@ -84,6 +84,17 @@ variable "max_concurrency" {
   }
 }
 
+variable "max_instances" {
+  description = "Maximum number of instances. This multiplies max_concurrency: one instance caps the service at four simultaneous provider calls, not Cloud Run's default hundred instances times four."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.max_instances >= 1
+    error_message = "max_instances must be at least 1; scale to zero is set with min_instance_count, not by making the maximum zero."
+  }
+}
+
 # The APIs this root needs are enabled here rather than assumed, and `disable_on_destroy = false`
 # because they are project-level: removing this service must not turn off Secret Manager or Cloud Run
 # for anything else that later shares the project.
@@ -135,11 +146,20 @@ resource "google_cloud_run_v2_service" "service" {
   # accident. The explicit value is the provider's default, named here so the refusal is visible.
   deletion_protection = true
 
+  # The per-instance concurrency is multiplied by the instance count. Cloud Run's default maximum is
+  # 100 instances, so the pinned four would become up to 400 simultaneous provider calls; one instance
+  # makes the total four. `min_instance_count = 0` is the accepted scale-to-zero trade.
+  scaling {
+    min_instance_count = 0
+    max_instance_count = var.max_instances
+  }
+
   template {
     service_account = google_service_account.runtime.email
 
     # Pinned, not inherited. A provider call is slow and can spend money; four simultaneous calls per
-    # instance is the bound chosen for this root, not whatever Cloud Run's default happens to be.
+    # instance is the per-instance bound. The scaling block above pins how many instances can multiply
+    # it, so the total is the product rather than this number alone.
     max_instance_request_concurrency = var.max_concurrency
 
     containers {
