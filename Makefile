@@ -145,7 +145,7 @@ github-apply: ## Apply the rest, so branch protection lands once the branch exis
 	$(TERRAFORM_GITHUB) init -input=false
 	$(TERRAFORM_GITHUB) apply -input=false
 
-# Who can reach the repository is not in the Terraform root: the agent joins as a fork, so there is
+# Who can reach the repository is not in the Terraform root: the contributor joins as a fork, so there is
 # no collaborator resource to drift and, equally, nothing to notice a collaborator added by hand.
 #
 # Three states, and two of them look identical from the wrong endpoint: a member or owner is in
@@ -153,7 +153,7 @@ github-apply: ## Apply the rest, so branch protection lands once the branch exis
 # `?affiliation=outside`; an invitation not yet accepted is in neither, only in `/invitations`.
 # Reading the accepted list alone makes "no access" and "invited, never clicked" the same output.
 # `?affiliation=all` is deliberately not used: it reports the owner as `admin`, so a line meant for
-# the agent would describe the owner. `filled_seats` is read because a seat going from 1 to 2 is how
+# the contributor would describe the owner. `filled_seats` is read because a seat going from 1 to 2 is how
 # a grant added as membership — the half that costs money — becomes visible.
 #
 # Every line prints when the answer is nothing, and says `unreadable` rather than `none` when the API

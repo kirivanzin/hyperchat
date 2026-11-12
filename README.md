@@ -4,9 +4,14 @@ A containerised FastAPI service on Cloud Run, provisioned by Terraform, that mak
 honestly: a Google ID token is verified, an allowlist of subjects decides who may spend, and the
 provider key is never in the image, the state file or the plan.
 
-Two things make it worth reading. The platform is small enough to check by hand, and the agent that
-contributed to it is an untrusted principal — its own account, a fork instead of write access, and a
-review on every pull request.
+Two things make it worth reading. The platform is small enough to check by hand, and the coding agent
+that contributed to it is an untrusted principal — its own account, a fork instead of write access,
+and a review on every pull request.
+
+Three words are used precisely here, because two of them are easy to confuse: **agent** is
+`src/hyperchat/agent.py`, the graph the service serves; **contributor** is `kirivanzin`, the GitHub
+principal that opens pull requests; **coding agent** is the LLM operating that checkout, inside its
+container.
 
 ## Read this in 60 seconds, 10 minutes, or an hour
 
@@ -25,7 +30,7 @@ Twelve PRs here exist only because the repository is public:
 
 | | |
 |---|---|
-| `#3`, `#5`, `#6`, `#8` | agent identity, ignored local material, and fork-based contribution |
+| `#3`, `#5`, `#6`, `#8` | the contributor's identity, ignored local material, and fork-based contribution |
 | `#10`, `#11` | the pinned build chain, and the redteam findings |
 | `#33` | the provider key outside the checkout |
 | `#48`, `#51`, `#54`, `#55` | project APIs, deployer identity, workflow/event binding, and the production environment |
@@ -52,7 +57,7 @@ that proves the negative direction, and a history that does not need rewriting.
 | `terraform/app` | Cloud Run, the runtime identity, the provider secret. Applied by a merge. |
 | `.github/workflows/ci.yml` | Lint, tests, `terraform validate`, and a build that is discarded. |
 | `.github/workflows/deploy.yml` | Deploy a successful `main` build; prove a non-main ref cannot authenticate. |
-| `docs/` | `authentication.md`, `repository-as-code.md`, `agents.md`. The agent's setup steps are `agent-runbook.md`. |
+| `docs/` | `authentication.md`, `repository-as-code.md`, `contributor.md`. The contributor's setup steps are `contributor-runbook.md`. |
 
 ## The decisions worth knowing
 
@@ -102,9 +107,9 @@ because those move four pins at once.
 every merge without saying why, so it is watched green and red first and required afterwards. Every
 action is pinned by commit SHA and the job runs with `contents: read`.
 
-**The agent is an untrusted principal.** A real account, but not a collaborator: it joins by fork,
-its push URL for this repository fails locally, and it has never merged anything. `docs/agents.md`
-argues the shape; `docs/agent-runbook.md` is the setup.
+**The contributor is an untrusted principal.** A real account, but not a collaborator: it joins by
+fork, its push URL for this repository fails locally, and it has never merged anything.
+`docs/contributor.md` argues the shape; `docs/contributor-runbook.md` is the setup.
 
 **The graph runtime is the largest dependency here, and it is deliberate.** `langgraph`,
 `langchain-core` and `langchain-deepseek` take the lock from 30 packages to 62. It is worth paying
@@ -138,4 +143,4 @@ dataset, an eval harness, and the security testing that goes with them.
 
 - `docs/authentication.md` — who can call a protected route, and what each check is for.
 - `docs/repository-as-code.md` — provisioning the repository with Terraform, and the token it costs.
-- `docs/agents.md` — the contributor agent as an untrusted principal.
+- `docs/contributor.md` — the coding agent as a contributor, and why it joins by fork.

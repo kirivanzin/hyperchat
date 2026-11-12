@@ -99,6 +99,6 @@ is a claim, not a key, and failing in the shell names which.
 ## The cost
 
 A reviewer cannot try this without `gcloud` installed and authenticated; `make token` is the cheap
-mitigation. The agent has no `gcloud`, so it verifies the deny paths, which need no token at all. And
-`pyjwt[crypto]` puts RSA in the image, which is not avoidable without dropping signature
+mitigation. The contributor has no `gcloud`, so it verifies the deny paths, which need no token at
+all. And `pyjwt[crypto]` puts RSA in the image, which is not avoidable without dropping signature
 verification — a decoder that believes whatever it is handed.

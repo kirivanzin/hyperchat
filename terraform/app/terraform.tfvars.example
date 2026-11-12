@@ -9,7 +9,7 @@
 # expected_audience = "32555940559.apps.googleusercontent.com"
 
 # Comma-separated subjects allowed to spend. Do NOT copy ALLOWED_SUBS from .env: that list includes
-# the agent's subject so it can test locally, and the deployed list must not contain it.
+# the contributor's subject so it can test locally, and the deployed list must not contain it.
 allowed_subs = "a-human-subject"
 
 # Bump this to rotate the provider key after replacing the token file. A deploy with no bump does not
