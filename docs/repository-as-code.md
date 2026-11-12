@@ -98,15 +98,35 @@ leave half a plan applied — which is the same shape as the secret-before-revis
 same answer: order the steps in the `Makefile` where they can be read, rather than in a sequence
 someone remembers.
 
-## What the state contains
+## The state is local, and that is the decision
+
+Both Terraform roots use local state: `terraform/github/terraform.tfstate` and
+`terraform/registry/terraform.tfstate`. Each is git-ignored by `*.tfstate`, exists only in the
+checkout that applied it, and has no locking and no spare copy. It is the only copy.
+
+Remote state is a bucket, and a bucket is another bootstrap: a third root applied by hand, before
+there is a service whose state anyone would mind losing. That is real work paid now to solve a
+problem nobody has yet — one operator, one laptop, and a destroy that can only come from the
+checkout holding the state — so the decision is to keep local state and write the consequence down.
+
+What breaks without it is bounded, and worth stating exactly: the resources keep running — Cloud Run
+does not need Terraform to stay up — but Terraform can no longer manage them, so recovery is an
+import or a recreate. That is an afternoon, not a catastrophe, and it is the same afternoon a backend
+bucket without versioning would cost. A machine that has the variables but not the state — this
+checkout after losing the file, or the second operator below — plans to create everything, and
+applying that plan fails against resources that already exist. A bare clone does not reach it: it
+stops at `No value for required variable`, because the variables are in the git-ignored tfvars. That
+is a louder failure and the wrong reason to rely on.
+
+The trigger to revisit is named so it is not a matter of mood:
+
+- a second operator who needs to `plan`
+- CI performing deploys, which needs state it can reach and lock
+- a resource whose recreate is not an afternoon — a database, or anything holding data
 
 Settings, not the token: provider credentials are never written to Terraform state. The state file
-holds the repository, its settings and its protection, is local, and is git-ignored alongside the
-`terraform.tfvars` that holds the owner.
-
-That has the usual consequence recorded in `README.md`: it is one operator's state, and a second
-operator cannot plan against this repository. The fix is a backend, and a backend is a bucket, and
-a bucket is another bootstrap.
+holds the repository, its settings and its protection, alongside the `terraform.tfvars` that holds
+the owner.
 
 ## What keeps this honest
 
