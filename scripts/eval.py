@@ -168,6 +168,11 @@ def load_cases(path: Path) -> list[Case]:
         missing = {"id", "input", "expects", "why"} - raw.keys()
         if missing:
             raise SystemExit(f"{path}:{number}: missing {', '.join(sorted(missing))}")
+        unknown = raw.keys() - {"id", "input", "expects", "why", "max_tokens", "group"}
+        if unknown:
+            # A stale copy of the dataset is how `known_failure` could come back and be ignored
+            # rather than rejected, which silently changes what a case means.
+            raise SystemExit(f"{path}:{number}: unknown fields {', '.join(sorted(unknown))}")
         if raw.get("group") is not None and raw["group"] not in GROUPS:
             raise SystemExit(f"{path}:{number}: unknown group {raw['group']!r}")
         cases.append(

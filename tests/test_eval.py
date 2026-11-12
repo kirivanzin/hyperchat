@@ -253,3 +253,22 @@ def test_the_population_oracle_catches_a_figure_and_allows_a_refusal_without_one
     assert harness.check(population.expects, figure)
     assert harness.check(population.expects, refusal) == ()
     assert harness.check(population.expects, real_neighbour)
+
+
+def test_an_unknown_field_is_refused_rather_than_ignored(tmp_path):
+    """A stale dataset copy must fail loudly: a field that stops being read changes a case's meaning."""
+    stale = tmp_path / "cases.jsonl"
+    stale.write_text(
+        json.dumps(
+            {
+                "id": "p1-x",
+                "input": "in",
+                "expects": {"equals": "x"},
+                "why": WHY,
+                "known_failure": "#73",
+            }
+        )
+        + "\n"
+    )
+    with pytest.raises(SystemExit, match="unknown fields known_failure"):
+        harness.load_cases(stale)
