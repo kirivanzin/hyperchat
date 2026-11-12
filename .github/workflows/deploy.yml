@@ -18,6 +18,9 @@ on:
     branches: [main]
   # The recovery path. A failed apply must not require an empty commit to retry.
   workflow_dispatch:
+  # The failing direction: the negative job below runs on pull requests, while the deploy job is
+  # skipped by its own condition.
+  pull_request:
 
 # Nothing here writes the repository. The OIDC token is the only extra capability, and only the job
 # that needs it asks for it.
