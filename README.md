@@ -90,13 +90,13 @@ the tags that do. A checkout whose commit was never pushed fails there, rather t
 Cloud Run update. If the registry cannot be asked — no `gcloud`, no login, no permission — it says
 that and shows gcloud's own error instead of claiming the image is missing.
 
-State lives in `gs://<project>-tfstate/hyperchat/`, not in a checkout — the bucket is passed to
-`terraform init` by the Makefile, so the project id stays out of the repository — so `make deploy` works from
-any machine with credentials and the variables, and two of them cannot apply at once. The bucket
-belongs to the sibling project's bootstrap root; this repository takes a prefix of it, and
-`docs/repository-as-code.md` records why that reversed #23 and what it costs. `make deploy-plan` shows
-the change, and `make registry-verify` shows the image the service is running beside the registry
-digest for the current tag.
+The app root's state lives in `gs://<project>-tfstate/hyperchat/app`, not in a checkout — the bucket
+is passed to `terraform init` by the Makefile, so the project id stays out of the repository, and any
+machine with credentials reaches the same state and takes turns with any other. `terraform/registry`
+and `terraform/github` are applied once by hand and keep local state, because nothing but a human
+writes them. `docs/repository-as-code.md` records that split and what it costs. `make deploy-plan`
+shows the change, and `make registry-verify` shows the image the service is running beside the
+registry digest for the current tag.
 
 ## Calling it as a human
 
