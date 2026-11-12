@@ -141,11 +141,13 @@ def test_the_contract_is_the_first_message_on_the_wire(caller, monkeypatch):
 
 def test_the_contract_is_not_written_into_state(caller, monkeypatch):
     """A system message in `MessagesState` is one a caller could append to, which is why it is not."""
-    captured = {}
+    # The messages handed to the model, not the graph's state: the test is about what goes on the
+    # wire, and calling that "state" is how a reader ends up checking the wrong half.
+    wire: list = []
 
     class Recorder:
         async def ainvoke(self, messages, **_kwargs):
-            captured["state"] = list(messages)
+            wire[:] = list(messages)
             return AIMessage(content="ok")
 
     async def node():
@@ -154,7 +156,7 @@ def test_the_contract_is_not_written_into_state(caller, monkeypatch):
     monkeypatch.setattr(agent, "_model", Recorder())
     result = asyncio.run(node())
 
-    assert captured["state"][0].type == "system"
+    assert wire[0].type == "system"
     assert [message.type for message in result["messages"]] == ["ai"]
 
 
