@@ -1,6 +1,15 @@
 terraform {
   required_version = ">= 1.9"
 
+  # State lives in the bucket the sibling project's bootstrap root owns, under a prefix of our own.
+  # This root is where `PROJECT` comes from, so it is reachable rather than being a file on one
+  # laptop. `terraform init -backend=false` in CI still works; nothing here needs a credential to
+  # validate.
+  backend "gcs" {
+    bucket = "saxeum-b9b1f-tfstate"
+    prefix = "hyperchat/registry"
+  }
+
   required_providers {
     google = {
       source  = "hashicorp/google"

@@ -1,6 +1,14 @@
 terraform {
   required_version = ">= 1.11"
 
+  # State lives in the bucket the sibling project's bootstrap root owns, under a prefix of our own.
+  # It is here rather than on the machine that applied last so a runner can reach and lock it;
+  # #42 records what that reverses and why. `terraform init -backend=false` in CI still works.
+  backend "gcs" {
+    bucket = "saxeum-b9b1f-tfstate"
+    prefix = "hyperchat/app"
+  }
+
   required_providers {
     google = {
       source  = "hashicorp/google"

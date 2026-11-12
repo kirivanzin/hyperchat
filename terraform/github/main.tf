@@ -1,6 +1,15 @@
 terraform {
   required_version = ">= 1.9"
 
+  # State lives in the bucket the sibling project's bootstrap root owns, under a prefix of our own.
+  # Not a second owner of the bucket: it already has one, and the versioning and 20-generation
+  # retention that make state recoverable are that root's to declare. `terraform init -backend=false`
+  # in CI still works; nothing here needs a credential to validate.
+  backend "gcs" {
+    bucket = "saxeum-b9b1f-tfstate"
+    prefix = "hyperchat/github"
+  }
+
   required_providers {
     github = {
       source  = "integrations/github"

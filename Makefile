@@ -21,7 +21,9 @@ BRANCH ?= main
 # the same identifier is how an image ends up in a registry that nothing reads.
 PROJECT ?= $(shell $(TERRAFORM) output -raw project 2>/dev/null)
 # And the service URL from the applied Cloud Run root, so smoke has one address to call.
-APP_STATE ?= terraform/app/terraform.tfstate
+# The state lives in a GCS bucket now (#42), not in this checkout, so there is no local file to guard:
+# a machine that has the variables reaches the same state as this one. What replaced the guard is the
+# bucket's own locking and versioning, which are the owning root's to declare and are not repeated here.
 APP_URL ?= $(shell $(TERRAFORM_APP) output -raw url 2>/dev/null)
 # And the repository comes from the applied GitHub root, for the same reason.
 FULL_NAME ?= $(shell $(TERRAFORM_GITHUB) output -raw full_name 2>/dev/null)
@@ -239,25 +241,17 @@ registry-verify: ## Show the deployed image and the registry digest for TAG (nee
 # dependency graph rather than three interleaved commands. The value is write-only and arrives as
 # TF_VAR_provider_api_key from the token file outside the checkout.
 deploy-plan: ## Show what the Cloud Run root would change, without changing it
-	@[ -f $(APP_STATE) ] || { \
-		echo "$(APP_STATE) is absent: this machine has the variables but not the state." >&2; \
-		echo "That is the accepted local-state trade in docs/repository-as-code.md#the-state-is-local-and-that-is-the-decision; restore the state file before applying." >&2; \
-		exit 1; }
 	@[ -n "$(PROJECT)" ] || { \
 		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
 		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
 		exit 1; }
-	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
+	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \ \
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
 		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false; \
 		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) plan -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)"
 
 deploy: ## Deploy this commit's image, secret version and service to Cloud Run in one apply
-	@[ -f $(APP_STATE) ] || { \
-		echo "$(APP_STATE) is absent: this machine has the variables but not the state." >&2; \
-		echo "That is the accepted local-state trade in docs/repository-as-code.md#the-state-is-local-and-that-is-the-decision; restore the state file before applying." >&2; \
-		exit 1; }
 	@[ -n "$(PROJECT)" ] || { \
 		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
 		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
