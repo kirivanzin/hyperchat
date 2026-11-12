@@ -13,6 +13,7 @@ still true when there are fifty of them. No service runs yet.
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | The Artifact Registry repository. Applied once. |
 | `docs/repository-as-code.md` | What provisioning the repository costs, and why the token is not in CI. |
+| `docs/agent-identity.md` | The out-of-band steps for giving the agent its own account, and the two credentials that costs. |
 
 ## Creating the repository
 
