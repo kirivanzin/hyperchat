@@ -124,12 +124,12 @@ precedence problem; it is a remembering problem, and the fix is to make the iden
 the directory. Give the agent its own checkout and let the path decide:
 
 ```sh
-git clone git@github-agent:saxeum/hyperchat.git ~/soper/agent/hyperchat
+git clone git@github-agent:saxeum/hyperchat.git ~/agent/hyperchat
 ```
 
 ```
 # ~/.gitconfig
-[includeIf "gitdir:~/soper/agent/"]
+[includeIf "gitdir:~/agent/"]
 	path = ~/.gitconfig-agent
 ```
 
@@ -150,15 +150,15 @@ helper — if `~/.gitconfig` sets `helper = store`, a plaintext credential cache
 account's token would otherwise be offered on this one's behalf, successfully and silently.
 
 **A separate clone, not a linked worktree.** `gitdir:` matches the *git* directory, and a linked
-worktree's is `<main>/.git/worktrees/<name>`, not its working path — a rule for `~/soper/agent/`
+worktree's is `<main>/.git/worktrees/<name>`, not its working path — a rule for `~/agent/`
 will not fire there. Worktrees need `extensions.worktreeConfig true` and `git config --worktree`
 instead, which is more parts for the same result.
 
 ### Prove it before committing, not after
 
 ```sh
-git -C ~/soper/agent/hyperchat var GIT_AUTHOR_IDENT
-git -C ~/soper/hyperchat var GIT_AUTHOR_IDENT
+git -C ~/agent/hyperchat var GIT_AUTHOR_IDENT
+git -C ~/hyperchat var GIT_AUTHOR_IDENT
 ```
 
 print the two different identities, with every include resolved. That is the command to reach for
@@ -222,13 +222,13 @@ prints `false`. That is the design in one line: the account can read the project
 it.
 
 ```sh
-git -C ~/soper/agent/hyperchat remote -v
+git -C ~/agent/hyperchat remote -v
 ```
 
 shows the fork as `origin`, and `DISABLED` as upstream's push URL.
 
 ```sh
-git -C ~/soper/agent/hyperchat push --dry-run upstream HEAD:refs/heads/probe
+git -C ~/agent/hyperchat push --dry-run upstream HEAD:refs/heads/probe
 ```
 
 fails locally, before any network call. The same command against `origin` succeeds, because that is

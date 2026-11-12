@@ -70,9 +70,14 @@ else. `make registry-status` prints the policy, so the absence is observed rathe
 both name `*.env`, `*.pem` and `*.key` so that the day one appears it is not baked in or committed
 by accident.
 
+**The build is pinned by digest, and that costs something.** `Dockerfile` names
+`python:3.13-slim@sha256:…` and `ghcr.io/astral-sh/uv:0.13.7@sha256:…`, because a mutable tag means a
+clone-and-build today runs a different binary than last week's, as root, with nothing recording which.
+The trade is that "silently new" becomes "silently old": the base stops taking Debian and CPython
+security rebuilds until someone bumps the digest, and nothing bumps it yet. That is #2, and it is why
+the ticket exists.
+
 ## Not here yet
 
 Cloud Run, a probe, authentication, rate limits, CI. Each of them adds a mechanism that this
 repository does not need in order to do the one thing it does.
-
-<!-- proposed by the agent account during a capability test -->

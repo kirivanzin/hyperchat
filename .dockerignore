@@ -16,6 +16,8 @@ __pycache__
 htmlcov
 terraform/
 .secret/
+.agent.identity
+AGENTS.md
 tests/
 docs/
 *.env
