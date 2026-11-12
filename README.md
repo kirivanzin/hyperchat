@@ -106,9 +106,9 @@ digest moves. Dependabot is what moves it — weekly, grouped, and ignoring inte
 because those move four pins at once.
 
 **CI is a required check on `main`.** A required check that has never been seen to fail can block
-every merge without saying why, so it reported green and red on real pull requests for a day before
-`terraform/github` named it. The context is the job name the API reports, not the workflow's. Every
-action is pinned by commit SHA and the job runs with `contents: read`.
+every merge without saying why, so it reported on real pull requests first and `terraform/github`
+named it afterwards. The context is the job name the API reports, not the workflow's. Every action is
+pinned by commit SHA and the job runs with `contents: read`.
 
 **The contributor is an untrusted principal.** A real account, but not a collaborator: it joins by
 fork, its push URL for this repository fails locally, and it has never merged anything.

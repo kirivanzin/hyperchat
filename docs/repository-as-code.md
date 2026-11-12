@@ -15,9 +15,13 @@ cost or it is not; this records which cost.
   (`ci`), and deliberately **no** required reviewers
 
 The required check is the one that only arrived after it had a history: `ci.yml` reported on every
-pull request for a day, green and red on real ones, before `terraform/github` named it. A check that
-has never been seen to fail can block every merge without saying why, so it is watched first and
-required afterwards.
+pull request for fourteen hours before `terraform/github` named it. A check that has never been seen
+to fail can block every merge without saying why, so it is watched first and required afterwards.
+
+The watching was not enough by itself. Of the eighty-one runs to that point, one was red, and it was
+a Docker Hub rate limit at the build step — which says nothing about whether a failing test blocks a
+merge. The failure that proved the check was required came afterwards, deliberately: a pull request
+with a failing test, refused at `BLOCKED`, and closed (#69).
 
 The absence that remains is required reviewers. One account cannot approve its own pull request, so a
 required approval that nobody can give would block every merge; that becomes correct the day there is
