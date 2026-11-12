@@ -16,7 +16,7 @@ was needed anyway.
 | Enabling 2FA | **you** | Required for any account that pushes code, and recovery codes are a credential. |
 | The SSH key | **you** | Registering it needs the account's own token, which is circular. |
 | The access token | **you** | No PAT resource exists in any provider, and no PAT API. |
-| **The grant on this repository** | **Terraform** | `github_repository_collaborator` — the one part that would otherwise be a click. |
+| Access to this repository | **Nothing**, deliberately | There is no collaborator resource, so nothing drifts — and equally, nothing would notice one added by hand. A status check is the only way to know. |
 
 Everything below marked *you* is out of band, once. Everything else is `make github-apply`.
 
@@ -89,18 +89,24 @@ ssh -T git@github-agent
 
 says `Hi <the-new-login>!` followed by a refusal of shell access, which is the success case.
 
-## 6. A token that cannot push code
+## 6. A token for the API, not for the repository
 
-A fine-grained personal access token, **scoped to `saxeum/hyperchat` only**, expiring in 90 days:
+A **classic** personal access token, `repo` scope only, expiring in 90 days.
 
-- `Metadata` — Read, mandatory
-- `Pull requests` — Read and write, to review and approve
-- `Issues` — Read and write, to comment on a pull request and on a ticket
-- `Contents` — **not granted**
+Not fine-grained, and not by preference. A fine-grained token can only be scoped to repositories its
+owner reaches through their own account or an organisation **membership**, and this account is
+deliberately not a member — `saxeum/hyperchat` will not appear in that picker at all.
 
-That last absence is the point. Git goes over SSH from step 5, so the token never needs to be usable
-as a git password, and a token that cannot push code is a much smaller thing to leak than one that
-can. It is also why the two credentials are worth having separately at all.
+`repo` is wider than it sounds and narrower than it sounds, for the same reason: it grants what the
+account can already reach, and after step 8 that is one public fork and nothing else. It is the scope
+to stop trusting the moment this account is involved with a second repository.
+
+Git goes over SSH from step 5, so the token is never a git password. It exists for forking, opening
+pull requests, and commenting.
+
+`gh` refuses to *store* a classic token that lacks `read:org` — `gh auth login --with-token` fails
+with `missing required scope`. If the token should live in the keyring rather than in a file, add
+`read:org`; on an account in no organisation it reads nothing at all.
 
 ## 7. Three identities, and only one of them is `user.name`
 
@@ -167,40 +173,40 @@ whenever a commit lands under the wrong name.
   per-command `GIT_AUTHOR_*` and `GIT_COMMITTER_*` can, which is the answer that depends on never
   forgetting.
 
-## 8. Let Terraform record the grant
+## 8. No collaborator. A fork.
+
+Terraform adds this account to nothing, and `terraform/github` says so by having no resource for it.
+
+A collaborator with `write` is the only thing in this repository capable of publishing to it
+irreversibly, and a push to a public repository cannot be retracted: forks keep it, GH Archive keeps
+it, and the object stays fetchable by SHA after any force-push. So the account joins the way an
+untrusted contributor joins — with a fork.
 
 ```sh
-echo 'agent_username = "<the login>"' >> terraform/github/terraform.tfvars
+gh repo fork saxeum/hyperchat --clone=false
 ```
+
+The checkout it works in then points at that fork, with the project read-only:
 
 ```sh
-make github-apply
+git remote set-url origin git@github-agent:<the login>/hyperchat.git
+git remote add upstream https://github.com/saxeum/hyperchat.git
+git remote set-url --push upstream DISABLED
+git config remote.pushDefault origin
 ```
 
-That writes an invitation — and a written invitation is the *third* state in issue #4, not a grant.
-`github_repository_collaborator` reports success when the invite is sent, so `terraform plan` saying
-no changes cannot tell you the agent has access. The two lists that can:
+`DISABLED` is not a magic word. It is a URL that cannot resolve, so a mistaken `git push upstream`
+fails locally, before a server has to refuse it.
 
-```sh
-gh api /repos/saxeum/hyperchat/invitations --jq '.[] | {id, invitee: .invitee.login, permissions}'
-```
+**What this buys.** The project's refs are unreachable from this account: it cannot create a branch
+on `saxeum/hyperchat`, force-push one, or change a setting. What enters the project is what a human
+merged from a pull request.
 
-names the outstanding invitation, and
+**What it does not buy.** A leak is still a leak — the fork is public, because forks of public
+repositories are. What changes is where it lands: in `<the login>/hyperchat`, which can be deleted,
+rather than in the project, where everybody else's fork keeps a copy.
 
-```sh
-gh api '/repos/saxeum/hyperchat/collaborators?affiliation=outside' --jq '[.[].login]'
-```
-
-stays empty until it is accepted. Accept it as the agent, which is the first thing the token from
-step 6 is for:
-
-```sh
-GH_TOKEN=<the token> gh api -X PATCH /user/repository_invitations/<id>
-```
-
-Accepting through the email link does the same thing.
-
-## 9. Prove it, in the places that matter
+## 9. Prove it
 
 ```sh
 GH_TOKEN=<the token> gh api /user --jq .login
@@ -209,20 +215,42 @@ GH_TOKEN=<the token> gh api /user --jq .login
 prints the agent's login, not yours.
 
 ```sh
-GH_TOKEN=<the token> gh pr comment 1 --body "identity check"
+GH_TOKEN=<the token> gh api /repos/saxeum/hyperchat --jq .permissions.push
 ```
 
-is attributed to the agent — `gh pr view 1 --json comments --jq '.comments[-1].author.login'` shows
-which account posted it. That is the check that matters: an approval or an evidence comment from
-this account is what makes a review something other than a note to self.
+prints `false`. That is the design in one line: the account can read the project and cannot write to
+it.
+
+```sh
+git -C ~/soper/agent/hyperchat remote -v
+```
+
+shows the fork as `origin`, and `DISABLED` as upstream's push URL.
+
+```sh
+git -C ~/soper/agent/hyperchat push --dry-run upstream HEAD:refs/heads/probe
+```
+
+fails locally, before any network call. The same command against `origin` succeeds, because that is
+the fork.
 
 ```sh
 gh api /orgs/saxeum --jq .plan.filled_seats
 ```
 
-still prints `1`. An outside collaborator on a public repository does not consume a seat; if this
-ever reads `2`, the account was added as an organisation member instead and the invitation should be
-withdrawn.
+prints `1`. The account is neither a member nor a collaborator, so it consumes nothing.
+
+And the thing the experiment is actually about — a comment on a pull request, from an account that is
+not its author. Anyone can comment on a public repository, so this needs no permission at all:
+
+```sh
+GH_TOKEN=<the token> gh pr comment <number> --body "identity check"
+```
+
+**One consequence to know before enabling required reviews.** An approval from an account without
+write access does not count toward required approving reviews. Here that is fine: no reviews are
+required, and the invariant is about a *comment*, which anyone may write. The day required approvals
+appear, this account has to become a collaborator, and this section stops being true.
 
 ## Where the notes go
 
@@ -238,17 +266,16 @@ beats one in a home directory precisely because it can be read, diffed and teste
 
 - **Two static credentials and a 2FA seed.** None of them can be rotated by Terraform.
 - **A second identity you are accountable for**, in your name, on a public repository.
-- **One more thing that can drift** from what `terraform/github` declares, which is why the grant is
-  the part Terraform owns and `make github-status` does not show it — the collaborator list is a
-  different call, and it is not yet in the status target.
+- **A public fork.** Anything pushed there is public too. It is deletable; the project's history is
+  not, and that difference is the entire reason for the fork.
+- **No approvals.** The agent can comment and review, and an approval from it will not count toward a
+  required review, because that needs write access. Its verification is a comment.
 
 ## Teardown
 
-Reverse order, and it is worth doing deliberately rather than by deleting the account first:
+Delete the fork, revoke the token, remove the SSH key from the account, and only then delete the
+account, which revokes whatever is left.
 
-```sh
-terraform -chdir=terraform/github apply -var 'agent_username='
-```
-
-destroys the collaborator resource. Then revoke the token, delete the SSH key from the account, and
-only then delete the account, which revokes anything left.
+There is no collaborator to remove and no Terraform resource to destroy. That absence is the design,
+and it is worth noticing that teardown here means "throw away the contributor's own half" rather than
+"revoke access to ours".
