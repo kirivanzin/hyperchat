@@ -112,9 +112,15 @@ resource "google_storage_bucket_iam_member" "deployer_state" {
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.deployer.email}"
 
+  # The second clause is not decoration: `storage.objects.list` is authorised against the *bucket*,
+  # not against an object under the prefix, so a prefix-only condition fails at `terraform init` with
+  # "does not have storage.objects.list access to the bucket" — which is how this grant was found to
+  # be wrong the first time the workflow used it. Listing returns object names across the bucket;
+  # reading or writing an object outside `hyperchat/` is still denied, because those calls are
+  # authorised against the object.
   condition {
     title      = "hyperchat-prefix"
-    expression = "resource.name.startsWith(\"projects/_/buckets/${var.project}-tfstate/objects/hyperchat/\")"
+    expression = "resource.name.startsWith(\"projects/_/buckets/${var.project}-tfstate/objects/hyperchat/\") || resource.name == \"projects/_/buckets/${var.project}-tfstate\""
   }
 }
 

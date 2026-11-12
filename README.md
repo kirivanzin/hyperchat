@@ -117,7 +117,9 @@ bucket. The allowlist is the deployed one: `.env`'s includes the agent so it can
 subject must not be deployed.
 
 The job authenticates as `hyperchat-deployer` through Workload Identity — the provider refuses any
-repository but this one and any ref but `refs/heads/main` — builds and pushes this commit's image,
+repository but this one and any ref but `refs/heads/main` — and, when this commit's image is not
+already in the registry, builds and pushes it (`make image-exists` decides; a tag that exists is a
+commit whose image exists, and the registry's immutability means it must never be pushed twice),
 runs `make deploy` with the provider key read from Secret Manager into that step's environment, then
 asserts `/livez` is `200` and `/api/me` without a token is `401`. `make smoke` stays a human step
 because it mints a token from a user login, which this identity cannot do.
