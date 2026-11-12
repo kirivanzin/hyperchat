@@ -30,7 +30,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help info test build run stop github github-plan github-create github-remote \
+.PHONY: help info lint test build run stop github github-plan github-create github-remote \
         github-apply github-status registry-plan registry-apply login push registry-status
 
 help: ## Show this help
@@ -42,6 +42,9 @@ info: ## Print what the next command will use, before it uses it
 	@printf '  repository  %s\n' "$(REPOSITORY)"
 	@printf '  tag         %s\n' "$(TAG)"
 	@printf '  push to     %s\n' "$(if $(PROJECT),$(REMOTE),<unset>)"
+
+lint: ## Check formatting and lint (no credentials; ruff itself comes from PyPI)
+	@uv run ruff format --check . && uv run ruff check --output-format=concise .
 
 test: ## Run the tests
 	uv run pytest -q

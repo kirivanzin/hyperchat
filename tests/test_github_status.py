@@ -83,6 +83,10 @@ def run_status(tmp_path, answers, refusals=None):
         env=env,
         capture_output=True,
         text=True,
+        # Explicit, and not because it was the default: the caller asserts on `returncode`, and a
+        # helper that raised instead would turn "the target failed" into an exception in the runner
+        # rather than a failed assertion the reader can see.
+        check=False,
     )
 
 
