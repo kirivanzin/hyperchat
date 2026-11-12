@@ -66,10 +66,13 @@ def get_model() -> ChatDeepSeek:
 
 
 async def close_model() -> None:
-    """Close the client the model holds. Called on shutdown, and by the CLI."""
+    """Close both pools the model holds. Called on shutdown, and by the CLI."""
     global _model
     if _model is not None:
         await _model.root_async_client.close()
+        # The sync pool exists whether or not a sync path used it, so closing only the async one
+        # leaves it open for the life of the process.
+        _model.root_client.close()
         _model = None
 
 

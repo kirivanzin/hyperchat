@@ -7,6 +7,7 @@ work: a real `ChatDeepSeek` pointed at an `httpx.MockTransport`, which is the on
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -169,6 +170,47 @@ def test_an_empty_message_is_rejected_before_the_model(caller, monkeypatch):
 
     assert response.status_code == 422
     assert seen == []
+
+
+def test_an_over_long_message_is_rejected_before_the_model(caller, monkeypatch):
+    # The output cap does not bound the input: a provider charges for the prompt too. 4000 is the
+    # sibling's cap, and 4001 is the first value that must not reach the provider.
+    seen: list[dict] = []
+    monkeypatch.setattr(agent, "_model", recorded_model(seen, max_tokens=8))
+
+    response = client.post("/api/chat", json={"message": "x" * 4001})
+
+    assert response.status_code == 422
+    assert seen == []
+
+
+# --- the client lifetime --------------------------------------------------------------------------
+
+
+def test_closing_the_model_closes_both_pools(monkeypatch):
+    class Pool:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class AsyncPool(Pool):
+        async def close(self) -> None:  # type: ignore[override]
+            self.closed = True
+
+    class Model:
+        root_client = Pool()
+        root_async_client = AsyncPool()
+
+    model = Model()
+    monkeypatch.setattr(agent, "_model", model)
+
+    asyncio.run(agent.close_model())
+
+    assert model.root_client.closed
+    assert model.root_async_client.closed
+    assert agent._model is None
 
 
 # --- the CLI, which runs the same graph -----------------------------------------------------------

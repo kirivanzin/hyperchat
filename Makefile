@@ -68,8 +68,12 @@ token: ## Print a Google ID token for EXPECTED_AUDIENCE (needs gcloud, logged in
 # The same graph the endpoint serves, run directly: no HTTP and no token, because authentication is a
 # property of the route rather than of the graph. This is the debugging tool, and it is the object
 # that runs in the service rather than a second implementation of it.
-chat: ## One message through the graph, reading .env (needs PROVIDER_API_KEY)
-	@set -a; [ -f .env ] && . ./.env; set +a; uv run python -m hyperchat.chat "$(MESSAGE)"
+#
+# `$$MESSAGE` is deliberate: make turns `$$` into `$`, leaving the shell to expand `$MESSAGE` at run
+# time. `$(MESSAGE)` would have make expand the value first, so `$HOME` or `$5` inside the message
+# would be eaten before Python saw it. MESSAGE belongs in the environment, not in make's arguments.
+chat: ## One message from MESSAGE in the environment through the graph (reads .env; needs PROVIDER_API_KEY)
+	@set -a; [ -f .env ] && . ./.env; set +a; uv run python -m hyperchat.chat "$$MESSAGE"
 
 stop: ## Stop the running container
 	@docker stop $(IMAGE) 2>/dev/null || true

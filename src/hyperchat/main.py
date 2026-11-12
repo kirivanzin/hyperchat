@@ -106,7 +106,9 @@ def me(caller: Annotated[Caller, Depends(require_caller)]) -> dict[str, str | No
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1)
+    # Capped so one request cannot become an expensive one by accident. The output cap does not
+    # bound the input: the provider charges for the prompt too, and a 10 MB body is still valid JSON.
+    message: str = Field(min_length=1, max_length=4000)
 
 
 @protected.post("/chat")

@@ -76,8 +76,9 @@ missing. `docs/authentication.md` has the checks, the status codes, and the cost
 
 ## Asking the model something
 
-`/api/chat` sends one message through a `langgraph` graph with one node, and returns the reply. The
-output cap is the only bound on what a call costs, so it is a number in `.env` and it goes on the wire
+`/api/chat` sends one message through a `langgraph` graph with one node, and returns the reply. Two
+bounds keep one call from becoming an expensive one by accident: the input is capped at 4000
+characters before any provider call, and the output cap is a number in `.env` that goes on the wire
 by name:
 
 ```sh
