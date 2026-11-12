@@ -4,16 +4,31 @@ version = "0.1.0"
 description = "A containerised hello-world, published to a private registry"
 readme = "README.md"
 requires-python = ">=3.13"
+# `fastapi`, not `fastapi[standard]`. The extra brings `fastapi-cli` and `fastapi-cloud-cli`, whose
+# subtree is FastAPI's hosted path -- telemetry, an installer detector, a cloud CLI -- and none of it is
+# reached here: the image's `CMD` is `uvicorn` directly, and nothing in this repository runs
+# `fastapi dev` or `fastapi run`. Declaring only what is imported keeps the supply-chain surface equal
+# to the code that uses it.
+#
+# uvicorn is declared because it is now the only thing that provides the server the image runs.
 dependencies = [
-    "fastapi[standard]>=0.162.2",
+    "fastapi>=0.162.2",
+    "uvicorn>=0.54.0",
 ]
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]
 build-backend = "uv_build"
 
+# `httpx2`, not `httpx`, and the name is the whole point of the measurement: Starlette's TestClient does
+# `import httpx2 as httpx` and only falls back to `httpx` under a `StarletteDeprecationWarning`. With
+# `filterwarnings = ["error"]` above, that fallback is a collection error, so declaring `httpx` -- the
+# obvious reading of "the test client needs httpx" -- fails the suite at import. It used to pass only
+# because `fastapi[standard]` dragged `httpx2` in through `fastapi-cloud-cli`, which is the coupling now
+# written down instead of inherited.
 [dependency-groups]
 dev = [
+    "httpx2>=2.16.0",
     "pytest>=9.2.0",
 ]
 
