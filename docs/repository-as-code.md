@@ -118,8 +118,10 @@ must be. The bucket itself is owned by the sibling project's bootstrap root
 (`saxeum/helpdesk-infra`, `terraform/bootstrap/main.tf`, `google_storage_bucket.tfstate`): versioning
 on, a lifecycle rule keeping 20 noncurrent generations, `prevent_destroy`. This repository takes a
 prefix and does not create or manage it — a second owner of a bucket that already has one is the
-duplication this repository keeps refusing, and the argument that keeps `google_project_service` out
-of a bootstrap root (#38) applies in reverse here. A project without that bucket fails honestly:
+duplication this repository keeps refusing, and the state it holds is recoverable only because that
+root says so. (The three `google_project_service` resources are the opposite case, and that is a
+deliberate exception: they are duplicated on purpose so a new project has an owner inside this
+repository. The next section says why.) A project without that bucket fails honestly:
 `make deploy` stops with `storage: bucket doesn't exist`, so the first step of a new deployment is
 that root, applied once by hand.
 
@@ -147,6 +149,23 @@ any workflow able to write that prefix can read what this repository puts there.
 Because the service has `deletion_protection = true`, a lost state leaves it undeletable by Terraform
 and by `gcloud run services delete`; the escape is
 `gcloud run services update <service> --region=<region> --no-deletion-protection` first, then delete.
+
+## The one-time root owns the project-level facts
+
+`terraform/registry` is applied once, by hand, and it owns three `google_project_service` resources
+besides the repository: Artifact Registry, Secret Manager and Cloud Run. They moved here from
+`terraform/app` because the app root is the root a merge applies, and a deploy should not be able to
+change project-level API state — which is also what let #43's deployer drop its one project-wide
+admin grant.
+
+`disable_on_destroy = false` on all three, so losing them from state leaves the APIs on rather than
+disabling a project.
+
+They are also enabled by the sibling repository's bootstrap root, which is two owners of one fact.
+That is deliberate for now rather than overlooked: a new project needs an owner inside this
+repository, or `make registry-apply` cannot provision one, and the alternative — depending on another
+repository's bootstrap — makes this one not self-contained. Two states managing one API is harmless
+while neither destroys it, and `disable_on_destroy = false` means neither does.
 
 ## What keeps this honest
 

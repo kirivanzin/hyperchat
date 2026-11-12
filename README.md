@@ -12,8 +12,8 @@ service, in a way that is still true when there are fifty of them.
 | `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, no cache reused across builds. |
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
-| `terraform/registry` | The Artifact Registry repository. Applied once. |
-| `terraform/app` | The Cloud Run service, its runtime identity, the provider secret and version, and the two project APIs it needs. Applied after an image exists. |
+| `terraform/registry` | The Artifact Registry repository and the three project APIs the service needs. Applied once, by hand, before the first push. |
+| `terraform/app` | The Cloud Run service, its runtime identity, and the provider secret and version. Applied after an image exists. |
 | `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
 | `scripts/token.sh` | `make token`: a Google ID token for the configured audience, from your own `gcloud` login. |
 | `scripts/smoke.sh` | `make smoke`: the deployed probes, and `/api/me` both without and with a token. |
@@ -71,11 +71,11 @@ The deployed `ALLOWED_SUBS` must not be copied from `.env`: the local list inclu
 subject so it can test, and the deployed list must not contain it. `expected_audience` defaults to the
 gcloud user-token client id, because it is a constant rather than a per-deployment choice.
 
-The two project APIs are enabled by the same root that uses them, in dependency order rather than in
-a separate bootstrap step:
+The three project APIs are enabled once by `terraform/registry`, which is applied before the first
+push; `make deploy` never touches them:
 
 ```sh
-make deploy                # APIs -> secret -> version -> grant -> service, in one apply
+make deploy                # secret -> version -> grant -> service, in one apply
 make smoke                 # /, /livez, /readyz, and /api/me without and with a token
 ```
 
