@@ -1,10 +1,8 @@
 # Every operation this repository supports, in the order it happens:
 #   github -> registry -> login -> build -> push -> deploy.  `make help` lists them.
 #
-# The image tag is the commit, not "dev", and the registry refuses to overwrite a tag
-# (docker_config.immutable_tags in terraform/registry). Two things follow, both intended: pushing the
-# same commit twice fails, and any digest in the registry can be traced back to the source that
-# produced it. Re-pushing a commit is `make push TAG=<sha>-2`.
+# The tag is the commit and the registry refuses to overwrite a tag, so pushing the same commit twice
+# fails on purpose. A rebuild is `make push TAG=<sha>-2`.
 
 IMAGE      ?= hyperchat
 TAG        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -71,17 +69,9 @@ test: ## Run the tests
 build: ## Build the image for this commit, pulling the base image
 	docker build --pull -t $(LOCAL) .
 
-# `.env` is read by the Makefile, not by the application. The app reads the environment and refuses to
-# start without the two values in it, so a missing value is a crash at import rather than something a
-# file quietly supplied. `set -a` exports every assignment; the `-f` guard means an absent .env is the
-# application's error, naming the value it wanted, instead of the shell's.
 # The environment both local targets need, in one place so the two cannot drift: `.env` for the
-# audience and the allowlist, and the provider key from a file *outside* the checkout.
-#
-# The key is not in `.env`, and not because it would be committed there — `.env` is git-ignored. It is
-# because a checkout gets copied, archived, cleaned and indexed by tools that were never asked to keep
-# a secret, and the rule that says so is easier to keep when it has no exception. `make dev` put a
-# credential in a checkout the first time it was used, which is what this line exists to stop.
+# audience and the allowlist, and the provider key from a file outside the checkout. A `.env` that sets
+# PROVIDER_API_KEY is refused rather than preferred — docs/authentication.md has the reason.
 LOCAL_ENV = if [ -f .env ] && grep -qE '^[[:space:]]*(export[[:space:]]+)?PROVIDER_API_KEY=' .env; then \
               echo "PROVIDER_API_KEY is in .env, and it is a credential: it does not go in a checkout." >&2; \
               echo "keep it in $$HOME/.config/hyperchat/agent-deepseek.token, or export it for one command." >&2; \

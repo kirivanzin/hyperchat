@@ -1,7 +1,23 @@
 # hyperchat
 
-A containerised hello-world that exists to get one image into a private registry and a Cloud Run
-service, in a way that is still true when there are fifty of them.
+A containerised FastAPI service on Cloud Run, provisioned by Terraform, that makes one model call
+honestly: a Google ID token is verified, an allowlist of subjects decides who may spend, and the
+provider key is never in the image, the state file or the plan.
+
+Two things make it worth reading. The platform is small enough to check by hand, and the agent that
+contributed to it is an untrusted principal — its own account, a fork instead of write access, and a
+review on every pull request.
+
+## Read this in 60 seconds, 10 minutes, or an hour
+
+- **60 seconds:** the bullets below, and the layout table.
+- **10 minutes:** `docs/authentication.md` — the security model — then the decisions.
+- **An hour:** the pull requests. The arguments in this repository live there, against the SHA each
+  one was made on.
+
+`make help` lists every target; the order is `github → registry → login → build → push → deploy`.
+`make lint` and `make test` need no credentials. The merge path is `.github/workflows/deploy.yml`,
+whose header and `terraform/registry/identity.tf` are its documentation.
 
 ## The public tax
 
@@ -16,237 +32,110 @@ Twelve PRs here exist only because the repository is public:
 | `#49` | Dependabot's interpreter ignore |
 
 A private build would commit `terraform.tfvars` and state, give CI a service-account key, grant
-`roles/editor`, let the bot push, and force-push the history once. This repository pays roughly
-35–40% of the day instead, and buys properties a reviewer can check: no identifier in the tree, a
-Workload Identity condition a stranger can read and test, a fork that proves the negative direction,
-and a history that does not need rewriting.
+`roles/editor`, let the bot push, and force-push the history once. This repository pays roughly a
+third of its pull requests instead — twelve of thirty-four — and buys properties a reviewer can
+check: no identifier in the tree, a Workload Identity condition a stranger can read and test, a fork
+that proves the negative direction, and a history that does not need rewriting.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `src/hyperchat/` | The app: `main.py` the routes, `auth.py` the trust boundary, `agent.py` the model call as a graph, `config.py` what it needs to start and what it needs to think. |
-| `src/hyperchat/chat.py` | `make chat`: one message through the same graph, no HTTP. |
-| `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, no cache reused across builds. |
-| `Makefile` | Every operation, in the order it happens. Start with `make help`. |
+| `src/hyperchat/main.py` | The routes. `/`, `/livez` and `/readyz` are open; everything under `/api` is behind the router's dependency. |
+| `src/hyperchat/auth.py` | The trust boundary: token verification, the allowlist, and a rate-limited key cache. |
+| `src/hyperchat/agent.py` | The model call as a one-node graph — the same object `/api/chat` awaits and `make chat` runs. |
+| `src/hyperchat/config.py` | What the process refuses to start without, and what it reads on demand. |
+| `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, base images pinned by digest. |
+| `Makefile` | Every operation, in the order it happens. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
-| `terraform/registry` | The Artifact Registry repository and the three project APIs the service needs. Applied once, by hand, before the first push. |
-| `terraform/app` | The Cloud Run service, its runtime identity, and the provider secret and version. Applied after an image exists. |
-| `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
-| `scripts/token.sh` | `make token`: a Google ID token for the configured audience, from your own `gcloud` login. |
-| `scripts/smoke.sh` | `make smoke`: the deployed probes, and `/api/me` both without and with a token. |
-| `docs/repository-as-code.md` | What provisioning the repository costs, and why the token is not in CI. |
-| `docs/authentication.md` | Who can call a protected route, and why the allowlist — not the audience — is the gate. |
-| `docs/agent-identity.md` | The out-of-band steps for giving the agent its own account, and the two credentials that costs. |
+| `terraform/registry` | Artifact Registry, the three project APIs, and the deployer identity. Applied once, by hand. |
+| `terraform/app` | Cloud Run, the runtime identity, the provider secret. Applied by a merge. |
+| `.github/workflows/ci.yml` | Lint, tests, `terraform validate`, and a build that is discarded. |
+| `.github/workflows/deploy.yml` | Deploy a successful `main` build; prove a non-main ref cannot authenticate. |
+| `docs/` | `authentication.md`, `repository-as-code.md`, `agents.md`. The agent's setup steps are `agent-runbook.md`. |
 
-## Creating the repository
+## The decisions worth knowing
 
-```sh
-make github                 # create, point origin, push, protect
-```
+**The tag is the commit, and tags are immutable.** A tag that can be overwritten is not provenance:
+two images answer to the same name and the only record of which one was pushed is a shell history.
+Re-pushing a commit fails on purpose; a rebuild is `make push TAG=<sha>-2`.
 
-which is the four steps below, in order, each printed as it runs so a failure says which half you
-are in:
+**Docker authenticates as you, via `gcloud auth configure-docker`.** No service-account key, no
+static credential in a file, nothing to rotate. The token is minted by the credential helper.
 
-```sh
-make github-create          # the repository itself, so there is somewhere to push
-make github-remote          # point origin at it
-git push -u origin main
-make github-apply           # branch protection, now that main exists
-```
+**No IAM bindings on the registry.** It is reachable by the project's own identities and nobody else.
+`make registry-status` prints the policy, so the absence is observed rather than assumed.
 
-Two applies and not one, because protection attaches to a branch and a branch is a pointer to a
-commit that does not exist until something is pushed. `docs/repository-as-code.md` records that,
-and the credential it needs.
+**The runtime identity has one grant.** The Cloud Run service account is not the default compute
+account, which holds `roles/editor` on this project. It has `secretmanager.secretAccessor` on the
+provider secret and nothing else — attached to the secret, so `gcloud secrets get-iam-policy` is
+where it shows up.
 
-## Getting an image into the registry
+**The provider key is a Secret Manager reference, not a revision env value.** A revision's
+environment is readable by a viewer, so the runtime identity reads the secret instead. The value
+arrives as the write-only `TF_VAR_provider_api_key`: never in state, never in the plan file, and the
+revision pins the version rather than `latest`.
 
-```sh
-make registry-plan          # what would be created, and nothing created
-make registry-apply         # the repository itself; once, by hand
-make login                  # docker, authorised as your own gcloud identity
-make build                  # the image, tagged with the commit
-make push                   # into the repository
-make registry-status        # what exists, and who was granted access to it
-```
+**`allUsers` may invoke the service.** The allowlist is the gate, not IAM, which is the consequence
+of the audience choice in `docs/authentication.md`. The per-subject bound is the only thing between a
+public endpoint and spend, so concurrency is pinned at four per instance and scale-out at one
+instance: four simultaneous provider calls, not four hundred.
 
-`make info` prints the project, region, tag and destination before anything uses them, because a
-push into the wrong project succeeds.
+**The deployer is an identity the workflow can only *be*.** `terraform/registry/identity.tf` conditions
+the Workload Identity provider on this repository, `refs/heads/main`, this workflow file and the two
+events that run it — so a new workflow on `main` cannot inherit it. Five scoped grants, no project
+admin. Nothing in CI can widen it.
 
-The project id is not in this repository. `terraform/registry/terraform.tfvars` holds it and is
-git-ignored; the Makefile reads it back out of the applied state, so there is one copy of it rather
-than two that can disagree. `terraform/app` receives it from that state too rather than repeating it.
+**Only the root a merge applies keeps its state in a bucket.** `terraform/app` is remote and
+prefix-scoped, so a runner reaches it and two deploys take turns. `terraform/registry` and
+`terraform/github` are applied once by a human and keep local state. The project id is not in the
+repository: it lives in a git-ignored `terraform.tfvars` and the Makefile passes the bucket to
+`terraform init`. `docs/repository-as-code.md` records both, and what they cost.
 
-## Deploying it to Cloud Run
+**The build is pinned by digest, and that costs something.** A mutable tag means a clone-and-build
+today runs a different binary than last week's, as root, with nothing recording which. The trade is
+that "silently new" becomes "silently old": the base stops taking Debian and CPython rebuilds until a
+digest moves. Dependabot is what moves it — weekly, grouped, and ignoring interpreter minor versions
+because those move four pins at once.
 
-The registry and an image exist first; `terraform/app` creates the service, the secret and its
-version, not either of the things it runs from. The service uses `/livez` as its liveness probe and `/readyz`
-as readiness, which is what gates traffic. `/healthz` is deliberately not a route: Google Frontend
-reserves that exact path and never forwards it, so a probe there could never pass.
+**CI reports, and is not required.** A required check that has never been seen to fail can block
+every merge without saying why, so it is watched green and red first and required afterwards. Every
+action is pinned by commit SHA and the job runs with `contents: read`.
 
-`terraform/app/terraform.tfvars` is git-ignored; copy `terraform/app/terraform.tfvars.example`.
-The deployed `ALLOWED_SUBS` must not be copied from `.env`: the local list includes the agent's
-subject so it can test, and the deployed list must not contain it. `expected_audience` defaults to the
-gcloud user-token client id, because it is a constant rather than a per-deployment choice.
+**The agent is an untrusted principal.** A real account, but not a collaborator: it joins by fork,
+its push URL for this repository fails locally, and it has never merged anything. `docs/agents.md`
+argues the shape; `docs/agent-runbook.md` is the setup.
 
-The three project APIs are enabled once by `terraform/registry`, which is applied before the first
-push; `make deploy` never touches them:
+**The graph runtime is the largest dependency here, and it is deliberate.** `langgraph`,
+`langchain-core` and `langchain-deepseek` take the lock from 30 packages to 62. It is worth paying
+because everything after this — streaming, the run bounds, tools, eval — is work *on* the graph
+rather than work to introduce one.
 
-```sh
-make deploy                # secret -> version -> grant -> service, in one apply
-make smoke                 # /, /livez, /readyz, and /api/me without and with a token
-```
-
-`make deploy` exports `TF_VAR_provider_api_key` from
-`~/.config/hyperchat/agent-deepseek.token`. The secret version uses the write-only `secret_data_wo`
-argument, so the key is never in state or the plan file, and the revision names that version rather
-than `latest`. A deploy with no change creates no new version; bump `provider_key_version` to rotate
-the key deliberately.
-
-Before Terraform runs, `make deploy` checks that the image for `TAG` exists in the registry and names
-the tags that do. A checkout whose commit was never pushed fails there, rather than halfway through a
-Cloud Run update. If the registry cannot be asked — no `gcloud`, no login, no permission — it says
-that and shows gcloud's own error instead of claiming the image is missing.
-
-The app root's state lives in `gs://<project>-tfstate/hyperchat/app`, not in a checkout — the bucket
-is passed to `terraform init` by the Makefile, so the project id stays out of the repository, and any
-machine with credentials reaches the same state and takes turns with any other. `terraform/registry`
-and `terraform/github` are applied once by hand and keep local state, because nothing but a human
-writes them. `docs/repository-as-code.md` records that split and what it costs. `make deploy-plan`
-shows the change, and `make registry-verify` shows the image the service is running beside the
-registry digest for the current tag.
-
-## Deploying on a merge
-
-`.github/workflows/deploy.yml` runs after the `ci` workflow succeeds on `main`, and can also be
-dispatched by hand as the recovery path when an apply fails — a failed apply does not need an empty
-commit. Both paths use the `production` environment, so the job can require a reviewer.
-
-It needs two repository variables and one environment secret:
-
-- `PROJECT` and `WIF_PROVIDER` are identifiers, not credentials. The pull-request job needs them to
-  attempt the authentication it must be refused; gcloud prints them anyway.
-- `ALLOWED_SUBS` is the deployed allowlist, stored as a `production` environment secret so GitHub
-  masks it in step headers as well as log lines. It is not `.env`'s list: that one includes the agent.
-
-```sh
-gh workflow run deploy.yml      # recovery, on the current main commit
-```
-
-The job authenticates as `hyperchat-deployer` through Workload Identity. The provider refuses any
-repository, ref, workflow file or event other than this one and its two entry points, so a new
-workflow on `main` cannot inherit the identity. It builds and pushes this commit's image when the tag
-is not already present, runs `make deploy` with the provider key read from Secret Manager into that
-step's environment, then asserts `/livez` is `200` and `/api/me` without a token is `401`. `make
-smoke` stays a human step because it mints a token from a user login, which this identity cannot do.
-
-The identity itself is `terraform/registry/identity.tf`, applied once with `make registry-apply`. The
-workflow can never create or widen it. The event condition allows `workflow_dispatch` and
-`workflow_run`; that Terraform line is written here and must be applied before a merge-triggered
-deploy can authenticate.
-
-The pull-request job attempts the same authentication and fails if it succeeds, because the provider
-condition requires `refs/heads/main` and one of the two deploy events. It uses the repository
-variables, not the production environment.
-
-## Calling it as a human
-
-`/api/me` is protected and `/` is not. A token is a Google ID token whose audience is the `gcloud` SDK
-client id, so your own login can mint one:
-
-```sh
-make token                                        # valid for about an hour, printed, never written
-curl -H "Authorization: Bearer $(make token)" http://127.0.0.1:8080/api/me
-```
-
-`make token` reads the `aud` back out of the token before printing it, so a wrong login fails in the
-shell with a claim rather than in the service with a 401.
-
-The app reads `EXPECTED_AUDIENCE` and `ALLOWED_SUBS` and **refuses to start without them**; `.env` is
-read by the `Makefile`, not by the application, so a missing value is a crash at import naming what is
-missing. `docs/authentication.md` has the checks, the status codes, and the cost.
+**Nothing secret is in the image.** The provider key is a runtime reference, not a build input, and
+`.dockerignore` and `.gitignore` both name `*.env`, `*.pem` and `*.key`.
 
 ## Asking the model something
 
-`/api/chat` sends one message through a `langgraph` graph with one node, and returns the reply. Two
-bounds keep one call from becoming an expensive one by accident: the input is capped at 4000
-characters before any provider call, and the output cap is a number in `.env` that goes on the wire
-by name:
+`/api/chat` sends one message through the graph and returns the reply. The input is capped at 4000
+characters before any provider call, and the output cap goes on the wire by name:
 
 ```sh
 MESSAGE='Reply with exactly: ok' make chat
 PROVIDER_MAX_TOKENS=5 MESSAGE='Count from one to fifty.' make chat
 ```
 
-`make chat` runs the same `graph` object the endpoint awaits — no HTTP, no token — because a debugging
-tool that is a second implementation is a tool that drifts. It reads the provider key from
-`~/.config/hyperchat/agent-deepseek.token`, or from `PROVIDER_API_KEY` if that is already in the
-environment; the endpoint answers **503** when neither exists (the model is off, not broken) and
-**502** when the provider fails, with the reason logged and not returned. An empty reply is a 502 as
-well: a 200 with no text is indistinguishable from a truncation, and the log carries `finish_reason`
-so the operator can tell a cap set too low from a provider anomaly.
-
-## The decisions worth knowing
-
-**The tag is the commit, and tags are immutable.** A tag that can be overwritten is not provenance:
-two different images answer to the same name and the only record of which one was pushed is a shell
-history. Pushing the same commit twice therefore fails, on purpose.
-
-**Docker authenticates as you, via `gcloud auth configure-docker`.** No service account key, no
-static credential in a file, nothing to rotate. The token is minted by the credential helper and
-expires.
-
-**No IAM bindings on the repository.** It is reachable by the project's own identities and nobody
-else. `make registry-status` prints the policy, so the absence is observed rather than assumed.
-
-**The runtime identity has one grant.** The Cloud Run service account is not the default compute
-account, which holds `roles/editor` on this project. It has `roles/secretmanager.secretAccessor` on
-the provider secret and nothing else; the `terraform/app` output and
-`gcloud run services describe` make that checkable. The grant is attached to the secret, not the
-project, so `gcloud secrets get-iam-policy <secret>` is where it shows up.
-
-**The provider key is a Secret Manager reference, not a revision env value.** `run.viewer` can read a
-revision's environment through `gcloud run revisions describe`, so the key is read from the secret by
-the runtime identity instead. The secret and its version are Terraform's; the value arrives as the
-write-only `TF_VAR_provider_api_key` from the token file outside the checkout, and is never written to
-state or the plan file.
-
-**`allUsers` may invoke the service.** The allowlist is the gate, not IAM, matching the audience
-decision above. The consequence is that the allowlist and the per-subject bounds are the only things
-between a public endpoint and spend; `terraform/app/main.tf` pins concurrency at four per instance and
-scale-out at one instance, so the total is four simultaneous provider calls rather than four times
-Cloud Run's default instance count.
-
-**Nothing secret is in the image.** The provider key lives in Secret Manager and is a runtime
-reference, not a build input. `.dockerignore` and `.gitignore` both name `*.env`, `*.pem` and
-`*.key` so a local one is not baked in or committed by accident.
-
-**The build is pinned by digest, and that costs something.** `Dockerfile` names
-`python:3.13-slim@sha256:…` and `ghcr.io/astral-sh/uv:0.13.7@sha256:…`, because a mutable tag means a
-clone-and-build today runs a different binary than last week's, as root, with nothing recording which.
-The trade is that "silently new" becomes "silently old": the base stops taking Debian and CPython
-security rebuilds until someone bumps the digest, and nothing bumps it yet. That is #2, and it is why
-the ticket exists.
-
-**CI reports, and is not required.** `.github/workflows/ci.yml` runs `uv run pytest -q` and
-`terraform validate` on every pull request, with `contents: read` and every action pinned by commit
-SHA rather than by tag. It is deliberately not a required check: a check that has never been seen to
-fail can block every merge without saying why, so it is added first and required only once it has a
-history. `docs/repository-as-code.md` records why those two arrive in that order.
-
-**The graph runtime is the largest dependency here, and it is deliberate.** `langgraph`,
-`langchain-core` and `langchain-deepseek` take `uv.lock` from 30 packages to 62, and the image from 18
-to 55. #13 removed 41 by dropping a telemetry subtree; this adds a runtime back. It is worth paying
-because everything after this — streaming, the run bounds, tools — is work *on* the graph rather than
-work to introduce one.
-
-**The allowlist is the gate, not the audience.** The audience is the client id a `gcloud` user token
-carries, so anyone with a Google account can mint a token that verifies. Verification narrows that to
-"Google vouched for somebody"; `ALLOWED_SUBS` is the only thing deciding who gets through, and the
-only thing bounding cost. It is keyed on `sub`, never email: a subject survives a rename, an address
-stays with whoever takes it next.
+`make chat` runs the same `graph` object the endpoint awaits — no HTTP, no token — so a debugging
+tool cannot drift from the service. The endpoint answers **503** when no key is configured (the model
+is off, not broken) and **502** when the provider fails, with the reason logged and not returned. An
+empty reply is a 502 as well, and the log carries `finish_reason`.
 
 ## Not here yet
 
-Rate limits, streaming, and the run bounds. Each adds a mechanism that this repository does not need
-in order to run one model call honestly.
+Rate limits, streaming, the run bounds, and tracing. The next phase is the agent itself: tools, a
+dataset, an eval harness, and the security testing that goes with them.
+
+## Where to go deeper
+
+- `docs/authentication.md` — who can call a protected route, and what each check is for.
+- `docs/repository-as-code.md` — provisioning the repository with Terraform, and the token it costs.
+- `docs/agents.md` — the contributor agent as an untrusted principal.

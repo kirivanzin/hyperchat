@@ -2,5 +2,5 @@
 owner = "your-github-account"
 
 # No agent_username. The agent is not a collaborator: it participates as a stranger who has forked
-# the repository, which is what docs/agent-identity.md describes. Granting write here would be the
+# the repository, which is what docs/agents.md describes. Granting write here would be the
 # only thing in this configuration that could publish to a public repository irreversibly.
