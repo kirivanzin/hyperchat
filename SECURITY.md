@@ -14,6 +14,10 @@ service running, so the interesting classes are: anything that lets a commit rea
 review, anything that gets a third-party binary into the image, and anything that publishes a
 credential that was not meant to be public.
 
-`docs/repository-as-code.md` records what is deliberately accepted — a public repository, a fork the
-agent works through, and one static credential — so a report that names one of those as a finding will
-be answered with a pointer rather than a fix.
+Three things are deliberately accepted, and each is written down where it is argued rather than here:
+
+- **a public repository**, and the one static credential that provisions it —
+  `docs/repository-as-code.md`
+- **agent work arriving through a fork** rather than a collaborator grant — `docs/agent-identity.md`
+
+A report naming one of those will be answered with a pointer rather than a fix.
