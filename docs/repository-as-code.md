@@ -112,9 +112,11 @@ checkout holding the state — so the decision is to keep local state and write 
 What breaks without it is bounded, and worth stating exactly: the resources keep running — Cloud Run
 does not need Terraform to stay up — but Terraform can no longer manage them, so recovery is an
 import or a recreate. That is an afternoon, not a catastrophe, and it is the same afternoon a backend
-bucket without versioning would cost. A fresh clone has no state, so it plans to create everything
-and then fails because the resources already exist. That plan is not a deploy; the missing state is
-the reason, and this section is where it is accepted.
+bucket without versioning would cost. A machine that has the variables but not the state — this
+checkout after losing the file, or the second operator below — plans to create everything, and
+applying that plan fails against resources that already exist. A bare clone does not reach it: it
+stops at `No value for required variable`, because the variables are in the git-ignored tfvars. That
+is a louder failure and the wrong reason to rely on.
 
 The trigger to revisit is named so it is not a matter of mood:
 
