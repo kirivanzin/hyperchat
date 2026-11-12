@@ -34,7 +34,7 @@ Twelve PRs here exist only because the repository is public:
 | `#3`, `#5`, `#6`, `#8` | contributor identity, ignored local material, fork-based contribution |
 | `#10`, `#11` | the pinned build chain, and the redteam findings |
 | `#33` | the provider key outside the checkout |
-| `#48`, `#51`, `#54`, `#55` | project APIs, deployer identity, workflow/event binding, and the production environment |
+| `#48`, `#51`, `#54`, `#55` | project APIs, deployer identity, workflow/event binding, and the environment the deploy job runs in |
 | `#49` | Dependabot's interpreter ignore |
 
 A private build would commit `terraform.tfvars` and state, give CI a service-account key, grant
