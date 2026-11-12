@@ -44,7 +44,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help info lint test build dev run stop token chat github github-plan github-create github-remote \
+.PHONY: help info lint test eval build dev run stop token chat github github-plan github-create github-remote \
         github-apply github-status registry-plan registry-apply login push \
         registry-status registry-verify image-exists image-digest deploy-plan deploy smoke
 
@@ -65,6 +65,9 @@ lint: ## Check formatting and lint (no credentials; ruff itself comes from PyPI)
 
 test: ## Run the tests
 	uv run pytest -q
+
+eval: ## Every case in the dataset through the graph, beside a baseline that is not a model
+	@$(LOCAL_ENV); uv run python scripts/eval.py
 
 build: ## Build the image for this commit, pulling the base image
 	docker build --pull -t $(LOCAL) .

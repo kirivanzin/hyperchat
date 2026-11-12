@@ -21,7 +21,8 @@ container.
   one was made on.
 
 `make help` lists every target; the order is `github → registry → login → build → push → deploy`.
-`make lint` and `make test` need no credentials. The merge path is `.github/workflows/deploy.yml`,
+`make lint` and `make test` need no credentials; `make eval` needs the provider key, because it
+asks the model. The merge path is `.github/workflows/deploy.yml`,
 whose header and `terraform/registry/identity.tf` are its documentation.
 
 ## The public tax
@@ -55,6 +56,7 @@ that proves the negative direction, and a history that does not need rewriting.
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | Artifact Registry, the three project APIs, and the deployer identity. Applied once, by hand. |
 | `terraform/app` | Cloud Run, the runtime identity, the provider secret. Applied by a merge. |
+| `evals/` | The case set `make eval` scores, and the baseline it is scored against. |
 | `.github/workflows/ci.yml` | Lint, tests, `terraform validate`, and a build that is discarded. |
 | `.github/workflows/deploy.yml` | Deploy a successful `main` build; prove a non-main ref cannot authenticate. |
 | `docs/` | `authentication.md`, `repository-as-code.md`, `contributor.md`. The contributor's setup steps are `contributor-runbook.md`. |
@@ -138,7 +140,9 @@ empty reply is a 502 as well, and the log carries `finish_reason`.
 ## Not here yet
 
 Rate limits, streaming, the run bounds, and tracing. The next phase is the agent itself: tools, a
-dataset, an eval harness, and the security testing that goes with them.
+second model, and the security testing that goes with them. `make eval` is the first attempt at the
+other question — not what happened, but whether it was right — and its case set is twenty lines in
+`evals/cases.jsonl` with a `why` on each.
 
 ## Where to go deeper
 

@@ -44,5 +44,9 @@ terraform.tfvars
 # colleague's checkout would otherwise have no protection at all.
 AGENTS.md
 
+# The eval harness's records: one run's numbers, written beside the dataset and never published.
+# A committed results file would be a score from an old model reported as today's.
+evals/results.jsonl
+
 .DS_Store
 .zed/
