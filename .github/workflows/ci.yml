@@ -52,9 +52,9 @@ jobs:
         # `init -backend=false` first, and the ticket's one-liner is not enough on a fresh checkout:
         # `validate` needs the provider package that `init` puts in `.terraform/providers`, and on a
         # clone that directory does not exist. `-backend=false` because state is local and
-        # git-ignored, and no credential is needed to validate any of the three roots.
+        # git-ignored, and no credential is needed to validate any of the four roots.
         run: |
-          for root in terraform/github terraform/registry terraform/app; do
+          for root in terraform/github terraform/registry terraform/bootstrap terraform/app; do
             terraform -chdir="$root" init -backend=false -input=false
             terraform -chdir="$root" validate
           done

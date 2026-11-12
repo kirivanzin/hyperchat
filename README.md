@@ -13,7 +13,8 @@ service, in a way that is still true when there are fifty of them.
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | The Artifact Registry repository. Applied once. |
-| `terraform/app` | The Cloud Run service, its runtime identity, and the provider secret container. Applied after an image exists. |
+| `terraform/bootstrap` | The two project APIs the service needs. Applied once per project. |
+| `terraform/app` | The Cloud Run service, its runtime identity, and the provider secret and version. Applied after an image exists. |
 | `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
 | `scripts/token.sh` | `make token`: a Google ID token for the configured audience, from your own `gcloud` login. |
 | `scripts/smoke.sh` | `make smoke`: the deployed probes, and `/api/me` both without and with a token. |
@@ -57,28 +58,35 @@ push into the wrong project succeeds.
 
 The project id is not in this repository. `terraform/registry/terraform.tfvars` holds it and is
 git-ignored; the Makefile reads it back out of the applied state, so there is one copy of it rather
-than two that can disagree. `terraform/app` receives it from that state too rather than repeating it.
+than two that can disagree. `terraform/bootstrap` and `terraform/app` receive it from that state too rather than repeating it.
 
 ## Deploying it to Cloud Run
 
-The registry and an image exist first; `terraform/app` creates the service and the secret container,
-not either of the things it runs from. The service uses `/livez` as its liveness probe and `/readyz`
+The registry and an image exist first; `terraform/app` creates the service, the secret and its
+version, not either of the things it runs from. The service uses `/livez` as its liveness probe and `/readyz`
 as readiness, which is what gates traffic. `/healthz` is deliberately not a route: Google Frontend
 reserves that exact path and never forwards it, so a probe there could never pass.
 
 `terraform/app/terraform.tfvars` is git-ignored; copy `terraform/app/terraform.tfvars.example`.
 The deployed `ALLOWED_SUBS` must not be copied from `.env`: the local list includes the agent's
-subject so it can test, and the deployed list must not contain it.
+subject so it can test, and the deployed list must not contain it. `expected_audience` defaults to the
+gcloud user-token client id, because it is a constant rather than a per-deployment choice.
 
-A new provider secret is three steps, because a revision pointing at a secret with no version fails
-to start while the previous revision keeps serving — a deploy that appears to do nothing:
+The two project APIs are enabled once, in their own root, so the service root only touches its own
+resources:
 
 ```sh
-make deploy-secret         # secret container, runtime account and its one grant
-make deploy-secret-value   # the provider key from ~/.config/hyperchat/agent-deepseek.token
-make deploy                # the service, probes, and allUsers invoker
+make bootstrap-plan        # the APIs that would be enabled
+make bootstrap-apply       # Secret Manager and Cloud Run, once per project
+make deploy                # secret -> version -> grant -> service, in one apply
 make smoke                 # /, /livez, /readyz, and /api/me without and with a token
 ```
+
+`make deploy` exports `TF_VAR_provider_api_key` from
+`~/.config/hyperchat/agent-deepseek.token`. The secret version uses the write-only `secret_data_wo`
+argument, so the key is never in state or the plan file, and the revision names that version rather
+than `latest`. A deploy with no change creates no new version; bump `provider_key_version` to rotate
+the key deliberately.
 
 `make deploy` refuses when `terraform/app/terraform.tfstate` is absent, naming the local-state trade
 in `docs/repository-as-code.md`; it is for the machine with the variables and not the state, not for a
@@ -143,8 +151,9 @@ project, so `gcloud secrets get-iam-policy <secret>` is where it shows up.
 
 **The provider key is a Secret Manager reference, not a revision env value.** `run.viewer` can read a
 revision's environment through `gcloud run revisions describe`, so the key is read from the secret by
-the runtime identity instead. The secret container is Terraform's; the value is added from the
-git-ignored `.env` and never written to state.
+the runtime identity instead. The secret and its version are Terraform's; the value arrives as the
+write-only `TF_VAR_provider_api_key` from the token file outside the checkout, and is never written to
+state or the plan file.
 
 **`allUsers` may invoke the service.** The allowlist is the gate, not IAM, matching the audience
 decision above. The consequence is that the allowlist and the per-subject bounds are the only things

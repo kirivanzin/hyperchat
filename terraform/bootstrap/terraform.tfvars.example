@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars, which is git-ignored. `make bootstrap-apply` passes the project from the
+# applied registry root, so the Makefile path does not need this file.
+project = "your-project-id"

@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.9"
+  required_version = ">= 1.11"
 
   required_providers {
     google = {
@@ -42,8 +42,9 @@ variable "image" {
 }
 
 variable "expected_audience" {
-  description = "The audience a Google ID token must carry. The app refuses to start without it."
+  description = "The audience a Google ID token must carry. The gcloud user-token audience is a constant, so it has a default; override only if that client id changes."
   type        = string
+  default     = "32555940559.apps.googleusercontent.com"
 
   validation {
     condition     = length(trimspace(var.expected_audience)) > 0
@@ -95,19 +96,28 @@ variable "max_instances" {
   }
 }
 
-# The APIs this root needs are enabled here rather than assumed, and `disable_on_destroy = false`
-# because they are project-level: removing this service must not turn off Secret Manager or Cloud Run
-# for anything else that later shares the project.
-resource "google_project_service" "secretmanager" {
-  project            = var.project
-  service            = "secretmanager.googleapis.com"
-  disable_on_destroy = false
+variable "provider_api_key" {
+  description = "The provider API key. `make deploy` supplies it as TF_VAR_provider_api_key from outside the checkout; it is write-only and is never written to state or the plan file."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+  nullable    = false
+
+  validation {
+    condition     = length(trimspace(var.provider_api_key)) > 0
+    error_message = "provider_api_key must not be empty: set TF_VAR_provider_api_key from the token file."
+  }
 }
 
-resource "google_project_service" "run" {
-  project            = var.project
-  service            = "run.googleapis.com"
-  disable_on_destroy = false
+variable "provider_key_version" {
+  description = "Integer that triggers a new secret version when bumped. The value itself comes from provider_api_key."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.provider_key_version >= 1
+    error_message = "provider_key_version must be at least 1; bump it deliberately to rotate the key."
+  }
 }
 
 # A service account of its own, not the default compute account: that account has project-wide editor
@@ -118,17 +128,22 @@ resource "google_service_account" "runtime" {
   description  = "Runs the service. The only grant is secretAccessor on the provider secret."
 }
 
-# The secret container is Terraform's; the value is not. The ordering in `make deploy-secret` and
-# `make deploy-secret-value` exists because a revision referencing a secret with no version fails to
-# start while the previous revision keeps serving: a deploy that looks like nothing happened.
+# The secret container and its version are Terraform's. The value is write-only: it arrives as
+# TF_VAR_provider_api_key, never enters state or the plan file, and `provider_key_version` is the
+# explicit rotation trigger. The revision pins this version rather than `latest`, so the secret and
+# the service move together in one apply.
 resource "google_secret_manager_secret" "provider_key" {
   secret_id = var.provider_secret
 
   replication {
     auto {}
   }
+}
 
-  depends_on = [google_project_service.secretmanager]
+resource "google_secret_manager_secret_version" "provider_key" {
+  secret                 = google_secret_manager_secret.provider_key.id
+  secret_data_wo         = var.provider_api_key
+  secret_data_wo_version = var.provider_key_version
 }
 
 resource "google_secret_manager_secret_iam_member" "runtime_accessor" {
@@ -189,7 +204,7 @@ resource "google_cloud_run_v2_service" "service" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.provider_key.secret_id
-            version = "latest"
+            version = google_secret_manager_secret_version.provider_key.version
           }
         }
       }
@@ -238,10 +253,7 @@ resource "google_cloud_run_v2_service" "service" {
     }
   }
 
-  depends_on = [
-    google_project_service.run,
-    google_secret_manager_secret_iam_member.runtime_accessor,
-  ]
+  depends_on = [google_secret_manager_secret_iam_member.runtime_accessor]
 }
 
 # Public invoker, matching the rest of the project, with the app as the gate. The allowlist is what
@@ -266,4 +278,9 @@ output "service_account" {
 output "secret" {
   description = "The Secret Manager secret the revision reads."
   value       = google_secret_manager_secret.provider_key.secret_id
+}
+
+output "secret_version" {
+  description = "The secret version the revision is pinned to."
+  value       = google_secret_manager_secret_version.provider_key.version
 }

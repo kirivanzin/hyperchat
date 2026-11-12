@@ -4,9 +4,14 @@
 # for this commit, so neither is repeated here. For a manual plan, supply both:
 #   terraform -chdir=terraform/app plan -var="project=your-project-id" -var="image=..."
 
-# The audience a gcloud user token carries. Not secret.
-expected_audience = "32555940559.apps.googleusercontent.com"
+# expected_audience defaults to the gcloud user-token client id in main.tf. Override only if that
+# constant changes; requiring it in every tfvars made `-refresh-only` restate a value that never varies.
+# expected_audience = "32555940559.apps.googleusercontent.com"
 
 # Comma-separated subjects allowed to spend. Do NOT copy ALLOWED_SUBS from .env: that list includes
 # the agent's subject so it can test locally, and the deployed list must not contain it.
 allowed_subs = "a-human-subject"
+
+# Bump this to rotate the provider key after replacing the token file. A deploy with no bump does not
+# create a new secret version.
+# provider_key_version = 2
