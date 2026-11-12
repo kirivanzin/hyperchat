@@ -19,7 +19,8 @@ Three things are deliberately accepted, and each is written down where it is arg
 
 - **a public repository**, and the one static credential that provisions it —
   `docs/repository-as-code.md`
-- **agent work arriving through a fork** rather than a collaborator grant — `docs/agents.md`
+- **contributor work arriving through a fork** rather than a collaborator grant —
+  `docs/contributor.md`
 - **a public Cloud Run invoker**, with the app's allowlist as the gate and its concurrency as the
   cost bound — `README.md`
 

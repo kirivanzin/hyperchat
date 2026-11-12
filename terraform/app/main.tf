@@ -62,7 +62,7 @@ variable "expected_audience" {
 }
 
 variable "allowed_subs" {
-  description = "Comma-separated subjects allowed to call the service. Do not copy .env: that list includes the agent's subject, which must not be deployed."
+  description = "Comma-separated subjects allowed to call the service. Do not copy .env: that list includes the contributor's subject, which must not be deployed."
   type        = string
 
   validation {

@@ -114,17 +114,17 @@ def test_a_grant_and_an_unaccepted_invitation_are_both_named(tmp_path):
     result = run_status(
         tmp_path,
         {
-            OUTSIDE: '[{"login":"agent","role_name":"push"}]',
-            INVITATIONS: '[{"id":42,"invitee":{"login":"agent"}}]',
+            OUTSIDE: '[{"login":"outside-user","role_name":"push"}]',
+            INVITATIONS: '[{"id":42,"invitee":{"login":"outside-user"}}]',
             "/orgs/acme": '{"login":"acme","plan":{"filled_seats":2}}',
         },
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
     # `role_name` is what distinguishes a read grant from one that can publish.
-    assert value_of(result.stdout, "outside collaborators") == "agent (push)"
+    assert value_of(result.stdout, "outside collaborators") == "outside-user (push)"
     # The id, because an invitation that has not been accepted has no collaborator to name.
-    assert value_of(result.stdout, "pending invitations") == "42 (agent)"
+    assert value_of(result.stdout, "pending invitations") == "42 (outside-user)"
     # A seat going 1 -> 2 is the grant that is membership rather than a collaborator.
     assert value_of(result.stdout, "org filled seats") == "2"
 

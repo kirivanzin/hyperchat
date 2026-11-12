@@ -51,7 +51,7 @@ jobs:
       PROJECT: ${{ vars.PROJECT }}
       WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
       # The deployed allowlist. The environment secret is masked by GitHub in headers and logs; it is
-      # not the `.env` value, which includes the agent.
+      # not the `.env` value, which includes the contributor.
       ALLOWED_SUBS: ${{ secrets.ALLOWED_SUBS }}
       TF_VAR_allowed_subs: ${{ secrets.ALLOWED_SUBS }}
       # There is nobody here to answer `terraform apply`'s approval prompt, and a runner's stdin does

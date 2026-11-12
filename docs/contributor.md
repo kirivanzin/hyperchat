@@ -1,8 +1,8 @@
-# The agent is an untrusted principal
+# The coding agent joins as a contributor
 
-The contributor account `kirivanzin` is a real GitHub account with its own SSH key, its own token and
-its own checkout. It is not a collaborator: it joins by fork, and every one of its pull requests is
-reviewed and merged by the owner.
+The contributor account `kirivanzin` is a real GitHub account with its own SSH key, its own
+token and its own checkout. It is not a collaborator: it joins by fork, and every one of its pull
+requests is reviewed and merged by the owner.
 
 The point is not trust. It is that a principal which cannot publish to this repository cannot damage
 it, whatever it decides to do.
@@ -36,7 +36,7 @@ fails locally, before a server has to refuse it.
 | What | Set by | When it is wrong |
 |---|---|---|
 | Commit author and committer | `user.name` / `user.email` | commits attributed to the owner — visible, embarrassing |
-| Transport, i.e. who pushes | SSH key or remote URL | the agent's branch pushed with the owner's credential |
+| Transport, i.e. who pushes | SSH key or remote URL | the contributor's branch pushed with the owner's credential |
 | API, i.e. who opens PRs and comments | `GH_TOKEN` / `gh auth` | the pull request or the approval is the owner's — **silent**, and it defeats the point |
 
 A repository-local `user.name` already beats `~/.gitconfig`, so commit identity is not a precedence
@@ -45,7 +45,14 @@ separate clone, an `includeIf "gitdir:"` rule, and an empty `credential.helper` 
 inherited one.
 
 A separate clone, not a linked worktree: `gitdir:` matches the *git* directory, and a worktree's is
-`<main>/.git/worktrees/<name>`, so a rule for the agent's directory would not fire there.
+`<main>/.git/worktrees/<name>`, so a rule for the contributor's directory would not fire there.
+
+The machine keeps the word in several places: `git@github-agent`, `~/.ssh/hyperchat-agent`,
+`~/.gitconfig-agent`, `~/agent/hyperchat`, `~/.config/hyperchat/agent-deepseek.token` and its mount
+at `/run/agent-deepseek`, and the ignored `.agent.identity`. Those are names on a machine rather
+than claims about a principal, which is why this prose does not use them.
+
+The misnamed one is `agent-deepseek.token`: it is the provider key, not an agent's.
 
 ## What the account can actually do
 
@@ -64,10 +71,10 @@ false
 
 Two static credentials and a 2FA seed, none of which Terraform can rotate. A second identity the
 owner is accountable for, in their name, on a public repository. A public fork. And no approvals: an
-approval from an account without write access does not count toward required reviews, so the agent's
-verification is a comment that names the SHA it checked.
+approval from an account without write access does not count toward required reviews, so the
+contributor's verification is a comment that names the SHA it checked.
 
 ## The steps
 
-`docs/agent-runbook.md` — mailbox, account, 2FA, SSH key, token, the three identities, the fork, and
-how to prove it. A runbook is consulted rather than read; the argument is above.
+`docs/contributor-runbook.md` — mailbox, account, 2FA, SSH key, token, the three identities, the
+fork, and how to prove it. A runbook is consulted rather than read; the argument is above.

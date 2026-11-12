@@ -29,9 +29,10 @@ terraform.tfvars
 *.pem
 *.key
 
-# Anything kept locally that is not for publication: the agent's account details, notes about this
-# machine, tricks that only make sense here. Never committed, and never needed to build the project --
-# if the repository stops working without something, that something belongs in the repository.
+# Anything kept locally that is not for publication: the contributor's account details, notes
+# about this machine, tricks that only make sense here. Never committed, and never needed to
+# build the project -- if the repository stops working without something, that something belongs in
+# the repository.
 .secret/
 
 # Belt as well as braces: the identity file must never be public even if it is moved out of .secret/,
