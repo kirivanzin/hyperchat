@@ -7,13 +7,15 @@ still true when there are fifty of them. No service runs yet.
 
 | Path | What it is |
 |---|---|
-| `src/hyperchat/main.py` | The app: `uvicorn hyperchat.main:api`. One route. |
+| `src/hyperchat/` | The app: `main.py` the routes, `auth.py` the trust boundary, `config.py` the two values it will not start without. |
 | `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, no cache reused across builds. |
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | The Artifact Registry repository. Applied once. |
 | `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
+| `scripts/token.sh` | `make token`: a Google ID token for the configured audience, from your own `gcloud` login. |
 | `docs/repository-as-code.md` | What provisioning the repository costs, and why the token is not in CI. |
+| `docs/authentication.md` | Who can call a protected route, and why the allowlist — not the audience — is the gate. |
 | `docs/agent-identity.md` | The out-of-band steps for giving the agent its own account, and the two credentials that costs. |
 
 ## Creating the repository
@@ -54,6 +56,23 @@ The project id is not in this repository. `terraform/registry/terraform.tfvars` 
 git-ignored; the Makefile reads it back out of the applied state, so there is one copy of it rather
 than two that can disagree.
 
+## Calling it as a human
+
+`/api/me` is protected and `/` is not. A token is a Google ID token whose audience is the `gcloud` SDK
+client id, so your own login can mint one:
+
+```sh
+make token                                        # valid for about an hour, printed, never written
+curl -H "Authorization: Bearer $(make token)" http://127.0.0.1:8080/api/me
+```
+
+`make token` reads the `aud` back out of the token before printing it, so a wrong login fails in the
+shell with a claim rather than in the service with a 401.
+
+The app reads `EXPECTED_AUDIENCE` and `ALLOWED_SUBS` and **refuses to start without them**; `.env` is
+read by the `Makefile`, not by the application, so a missing value is a crash at import naming what is
+missing. `docs/authentication.md` has the checks, the status codes, and the cost.
+
 ## The decisions worth knowing
 
 **The tag is the commit, and tags are immutable.** A tag that can be overwritten is not provenance:
@@ -84,7 +103,13 @@ SHA rather than by tag. It is deliberately not a required check: a check that ha
 fail can block every merge without saying why, so it is added first and required only once it has a
 history. `docs/repository-as-code.md` records why those two arrive in that order.
 
+**The allowlist is the gate, not the audience.** The audience is the client id a `gcloud` user token
+carries, so anyone with a Google account can mint a token that verifies. Verification narrows that to
+"Google vouched for somebody"; `ALLOWED_SUBS` is the only thing deciding who gets through, and the
+only thing bounding cost. It is keyed on `sub`, never email: a subject survives a rename, an address
+stays with whoever takes it next.
+
 ## Not here yet
 
-Cloud Run, a probe, authentication, rate limits. Each of them adds a mechanism that this repository
-does not need in order to do the one thing it does.
+Cloud Run, a probe, rate limits. Each of them adds a mechanism that this repository does not need in
+order to do the one thing it does.
