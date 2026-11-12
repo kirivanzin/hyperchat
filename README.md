@@ -12,6 +12,7 @@ still true when there are fifty of them. No service runs yet.
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | The Artifact Registry repository. Applied once. |
+| `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
 | `docs/repository-as-code.md` | What provisioning the repository costs, and why the token is not in CI. |
 | `docs/agent-identity.md` | The out-of-band steps for giving the agent its own account, and the two credentials that costs. |
 
@@ -77,7 +78,13 @@ The trade is that "silently new" becomes "silently old": the base stops taking D
 security rebuilds until someone bumps the digest, and nothing bumps it yet. That is #2, and it is why
 the ticket exists.
 
+**CI reports, and is not required.** `.github/workflows/ci.yml` runs `uv run pytest -q` and
+`terraform validate` on every pull request, with `contents: read` and every action pinned by commit
+SHA rather than by tag. It is deliberately not a required check: a check that has never been seen to
+fail can block every merge without saying why, so it is added first and required only once it has a
+history. `docs/repository-as-code.md` records why those two arrive in that order.
+
 ## Not here yet
 
-Cloud Run, a probe, authentication, rate limits, CI. Each of them adds a mechanism that this
-repository does not need in order to do the one thing it does.
+Cloud Run, a probe, authentication, rate limits. Each of them adds a mechanism that this repository
+does not need in order to do the one thing it does.

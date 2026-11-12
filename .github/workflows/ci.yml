@@ -1,0 +1,51 @@
+# Reports, and is deliberately not required yet. A required check that never reports blocks every
+# merge, and the answer is not to skip the check — it is to add it, watch it go green and red on real
+# pull requests, and require it once it has earned that. `docs/repository-as-code.md` makes the same
+# argument for the two-step Terraform apply, for the same reason: a gate that exists before the thing
+# it gates is a gate nobody can pass.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only, because nothing here writes: the job runs tests and validates configuration. A workflow
+# whose token can write is a workflow whose next modification can write.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    # A versioned runner label rather than `-latest`, and every action pinned by commit SHA rather
+    # than by tag: the same argument as the digest-pinned images, at the scale where it applies. These
+    # steps run with this repository's token, so a moved tag is a supply-chain change to a thing that
+    # only ever runs tests.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # The same uv the image builds with, so `uv lock` here means what it means there.
+          version: "0.13.7"
+          # `.python-version` says 3.13; saying it here instead of relying on the file means a change
+          # to the file is a visible change to CI rather than a silent one.
+          python-version: "3.13"
+
+      - name: tests
+        run: uv run pytest -q
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+
+      - name: terraform validate
+        # `init -backend=false` first, and the ticket's one-liner is not enough on a fresh checkout:
+        # `validate` needs the provider package that `init` puts in `.terraform/providers`, and on a
+        # clone that directory does not exist. `-backend=false` because there is no backend to
+        # configure -- state is local and git-ignored -- and no credential either, which is why this
+        # can run on a fork's pull request with a read-only token.
+        run: |
+          terraform -chdir=terraform/github init -backend=false -input=false
+          terraform -chdir=terraform/github validate
