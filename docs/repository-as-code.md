@@ -98,39 +98,47 @@ leave half a plan applied — which is the same shape as any bootstrap that assu
 succeeded, and the same answer: order the steps in the `Makefile` where they can be read, rather than
 in a sequence someone remembers.
 
-## The state is local, and that is the decision
+## The state is in a bucket, and the bucket is not ours
 
-All three Terraform roots use local state: `terraform/github/terraform.tfstate`,
-`terraform/registry/terraform.tfstate` and `terraform/app/terraform.tfstate`. Each is git-ignored by
-`*.tfstate`, exists only in the checkout that applied it, and has no locking and no spare copy. It
-is the only copy.
+All three roots keep their state in `gs://<project>-tfstate/`, under a prefix each:
+`hyperchat/github`, `hyperchat/registry`, `hyperchat/app`. The bucket name is not in the backend
+blocks — the `Makefile` derives it from the project id and passes it as `-backend-config`, which is
+what keeps that identifier out of the repository, as this document says it must be. No checkout holds
+a state file any more,
+so a plan is the same plan on this laptop, on a second operator's machine, and on a runner — and two
+applies cannot interleave, because the bucket locks.
 
-Remote state is a bucket, and a bucket is another bootstrap: a fourth root applied by hand. That is
-real work paid now to solve a problem nobody has yet — one operator, one laptop, and a destroy that
-can only come from the checkout holding the state — so the decision is to keep local state and write
-the consequence down.
+The bucket is owned by the sibling project's bootstrap root (`helpdesk/bootstrap`), which declares
+what state storage needs and has applied it: versioning on, and a lifecycle rule that deletes a
+noncurrent version once 20 newer ones exist. This repository takes a prefix of that bucket and does
+not manage it. A second owner of a bucket that already has one is the duplication this repository
+keeps refusing, and the same argument that keeps `google_project_service` out of a bootstrap root
+(#38) applies in reverse here: the resource already has an owner, and it is not this repository.
 
-What breaks without it is bounded, and worth stating exactly: the resources keep running — Cloud Run
-does not need Terraform to stay up — but Terraform can no longer manage them, so recovery is an
-import or a recreate. That is an afternoon, not a catastrophe, and it is the same afternoon a backend
-bucket without versioning would cost. A machine that has the variables but not the state — this
-checkout after losing the file, or the second operator below — plans to create everything, and
-applying that plan fails against resources that already exist. A bare clone does not reach it: it
-stops at `No value for required variable`, because the variables are in the git-ignored tfvars. That
-is a louder failure and the wrong reason to rely on. Because the service has
-`deletion_protection = true`, a lost state file also leaves it undeletable by Terraform and by
-`gcloud run services delete`; the escape is
+**This reverses the decision of #23, on the trigger #23 named.** It listed three events that would
+change the answer, the second being "CI performing deploys, which needs state it can reach and lock".
+That is #42: a merge to `main` should build and deploy its own commit, and a runner has no laptop.
+The decision was right when it was made and it is the obstacle now; the reversal is recorded here
+rather than in a commit message, because this is where the next person looks.
+
+What the earlier decision gave up is worth keeping in view, because it is what the bucket buys back:
+state is now a network dependency — `plan` needs credentials even to read — and it leaves the
+machine. What it no longer costs is the case that paragraph described: a machine with the variables
+and not the state cannot exist, so it cannot plan to create what already exists. A lost state file
+was an afternoon of imports; a lost bucket object is a 20-generation rollback.
+
+The migration was `terraform init -migrate-state` per root, once, from the checkout that held the
+files. Each root's `terraform.tfstate.backup` is the pre-migration copy and stays until that root's
+first post-migration plan has been checked; the local `terraform.tfstate` files are zero bytes and
+are not read. They are deleted once that is confirmed, deliberately rather than by tidying.
+
+Settings, not the token: provider credentials are never written to Terraform state. That matters
+more now than when state lived on one disk — the bucket is shared, and any workflow able to write to
+its prefix can read the state this repository puts there.
+
+Because the service has `deletion_protection = true`, a lost state leaves it undeletable by Terraform
+and by `gcloud run services delete`; the escape is
 `gcloud run services update <service> --region=<region> --no-deletion-protection` first, then delete.
-
-The trigger to revisit is named so it is not a matter of mood:
-
-- a second operator who needs to `plan`
-- CI performing deploys, which needs state it can reach and lock
-- a resource whose recreate is not an afternoon — a database, or anything holding data
-
-Settings, not the token: provider credentials are never written to Terraform state. The state file
-holds the repository, its settings and its protection, alongside the `terraform.tfvars` that holds
-the owner.
 
 ## What keeps this honest
 
