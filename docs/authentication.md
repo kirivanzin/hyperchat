@@ -18,6 +18,26 @@ An unknown `kid`, a malformed token and an unsigned (`alg: none`) token are all 
 during verification. Each case has a test, and each test asserts the reason: two checks that answer
 401 for the wrong cause are one check.
 
+## The key cache is a rate-limited operation, not a lookup
+
+Google rotates the signing keys, so an unknown `kid` has to be able to trigger a refresh — that is
+what a rotation looks like. It is also attacker-controlled: a well-formed token carrying any `kid`
+is trivial to construct, and `/api/me` reaches the key lookup before any caller is known, so the
+rate limiter behind the allowlist does not apply to it.
+
+`PyJWKClient` refreshes whenever a `kid` is missing, and its `lifespan` governs staleness rather than
+a minimum interval, so it costs one outbound request per request. `KeySet` puts a floor on *forced*
+refreshes: an unknown `kid` inside the floor gets a 401 and no fetch, and a real rotation — which
+arrives long after the floor — is picked up unchanged.
+
+The test asserts **exactly one** fetch for five unknown key ids, then advances the clock past the
+floor and asserts **exactly two**. "Fewer than five" would pass a resolver that was never called at
+all, which proves nothing.
+
+This one is not only a local lesson. The sibling service refreshes unconditionally on an unknown
+`kid` as well, and the comment there guards a wider trigger — refreshing on any error, which would
+fire for every expired token — not this one. Whoever fixes it there can copy the floor.
+
 ## The audience is the gcloud SDK client, and that decides the security model
 
 `EXPECTED_AUDIENCE` is `32555940559.apps.googleusercontent.com` — the client id that a `gcloud` *user*
