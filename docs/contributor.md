@@ -50,9 +50,9 @@ A separate clone, not a linked worktree: `gitdir:` matches the *git* directory, 
 The machine keeps the word in several places: `git@github-agent`, `~/.ssh/hyperchat-agent`,
 `~/.gitconfig-agent`, `~/agent/hyperchat`, `~/.config/hyperchat/agent-deepseek.token` and its mount
 at `/run/agent-deepseek`, and the ignored `.agent.identity`. Those are names on a machine rather
-than claims about a principal, which is why this prose does not use them. The misnamed one is
-`agent-deepseek.token` — it is the provider key — and it is the next to go, once the three mounts
-outside this repository move with it.
+than claims about a principal, which is why this prose does not use them.
+
+The misnamed one is `agent-deepseek.token`: it is the provider key, not an agent's.
 
 ## What the account can actually do
 
