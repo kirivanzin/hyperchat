@@ -1,8 +1,7 @@
-# Reports, and is deliberately not required yet. A required check that never reports blocks every
-# merge, and the answer is not to skip the check — it is to add it, watch it go green and red on real
-# pull requests, and require it once it has earned that. `docs/repository-as-code.md` makes the same
-# argument for the two-step Terraform apply, for the same reason: a gate that exists before the thing
-# it gates is a gate nobody can pass.
+# The check `main` requires. It reported on every pull request for a day before it was required —
+# green and red on real ones — because a required check that has never been seen to fail blocks merges
+# without saying why. `terraform/github` names it, and the name is the one the API reports for the
+# job: `ci`.
 name: ci
 
 on:

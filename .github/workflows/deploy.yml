@@ -155,7 +155,15 @@ jobs:
     # The provider's condition allows only refs/heads/main, workflow_dispatch/workflow_run and this
     # workflow file. This job proves the pull-request direction is refused, and does not use the
     # production environment or its allowlist.
-    if: github.event_name == 'pull_request' && vars.PROJECT != '' && vars.WIF_PROVIDER != ''
+    #
+    # A fork pull request is skipped, and the skip is stated here rather than left to an empty
+    # variable: a fork does not receive repository variables, so a condition that only tested `vars`
+    # disabled this job silently on the pull request class it exists to police.
+    #
+    # The variables are no longer in the condition. A same-repo pull request without them now fails at
+    # `require identity configuration` instead of skipping, which is the honest answer: a guard that
+    # is not configured should be red, not absent.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
     timeout-minutes: 5
     runs-on: ubuntu-24.04
     permissions:
