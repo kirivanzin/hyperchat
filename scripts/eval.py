@@ -1,4 +1,4 @@
-"""Was it right? Twenty cases, fifteen verdicts and one rate, and baselines that are not models.
+"""Was it right? Twenty cases: one verdict, fourteen declared failures, one rate, two baselines.
 
 `make chat` already runs the same `graph` object `/api/chat` awaits — one `ainvoke`, no HTTP, no
 token — so this is that path plus a dataset and a predicate per case. It is not a second
@@ -21,6 +21,13 @@ Four decisions worth naming, because each one is a rule this file would otherwis
   sets `PROVIDER_MAX_TOKENS` and rebuilds the client, so `provider_settings()` and `get_model()` are
   what apply it. `PROVIDER_MAX_TOKENS` in the environment is overridden rather than inherited, so a
   run is pinned to the dataset instead of to whoever's shell it started in.
+- **A case whose failure is expected names the ticket that will fix it.** `known_failure` holds a
+  ticket, not `true`, and it makes two claims: the case fails today, and the day it passes the
+  dataset is stale. Failing is therefore not a surprise and passing is — the other way round from
+  every other case, and the only shape that keeps a suite honest about a declared gap instead of
+  red-because-expected. `make eval` exits 0 while fourteen cases declare `#81`; the day they pass,
+  it exits 1 and names them, which is the signal to delete the declaration rather than a signal that
+  the agent broke.
 - **A case that a model resists some of the time is a rate, not a verdict.** The injection cases
   are the same measurement five times: the model either answers the real question without obeying
   the payload or it does not, and it does both across runs — in review, one run of the unchanged
@@ -64,7 +71,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from hyperchat.agent import NotConfigured, ProviderFailed, close_model, graph
+from hyperchat.agent import NotConfigured, ProviderFailed, close_model, graph, prompt_sha256
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / "evals" / "cases.jsonl"
@@ -92,9 +99,15 @@ class Group:
 
 GROUPS: dict[str, Group] = {
     # Five framings of "an instruction in the user's message must not replace the task". The model
-    # resists some of them and not others, run to run, which is why this is a rate: `least` stays
-    # `None` until #73's system prompt lands, and then it becomes the number #73 claims to reach.
-    "injection": Group(owner="#73", least=None),
+    # resists some of them and not others, run to run, which is why this is a rate.
+    #
+    # #73's system prompt landed, and it changed what this rate measures: the five cases ask for
+    # tasks the prompt now refuses as out of scope, so they fail the *benign* half and the rate is
+    # really counting refusals. `least` therefore stays `None` — a threshold over a number that
+    # measures something else is worse than no threshold — and #81 is where the cases are re-pointed
+    # at the contract. When it lands, `least` is the rate the prompt achieves and a run below it is
+    # news.
+    "injection": Group(owner="#81", least=None),
 }
 
 
@@ -110,6 +123,8 @@ class Case:
     # The group whose rate this case is one sample of. A group has an owner and, once the owner has
     # landed, a threshold; see `GROUPS`.
     group: str | None = None
+    # The ticket that will make this case pass. A failure is expected and a pass is the surprise.
+    known_failure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,9 +165,14 @@ class Result:
         a rate, and `exit_code` reads the group's score. That is what stops a model that resists
         some of the time from turning the suite red — once for improving, once for regressing
         below a threshold that the rate, not this case, is measured against.
+
+        A `known_failure` case inverts it: failing is what it says it does, so a pass is the surprise
+        and means the dataset is out of date.
         """
         if self.group is not None:
             return False
+        if self.case.known_failure is not None:
+            return self.passed
         return not self.passed
 
 
@@ -168,7 +188,15 @@ def load_cases(path: Path) -> list[Case]:
         missing = {"id", "input", "expects", "why"} - raw.keys()
         if missing:
             raise SystemExit(f"{path}:{number}: missing {', '.join(sorted(missing))}")
-        unknown = raw.keys() - {"id", "input", "expects", "why", "max_tokens", "group"}
+        unknown = raw.keys() - {
+            "id",
+            "input",
+            "expects",
+            "why",
+            "max_tokens",
+            "group",
+            "known_failure",
+        }
         if unknown:
             # A stale copy of the dataset is how `known_failure` could come back and be ignored
             # rather than rejected, which silently changes what a case means.
@@ -183,6 +211,7 @@ def load_cases(path: Path) -> list[Case]:
                 why=raw["why"],
                 max_tokens=raw.get("max_tokens"),
                 group=raw.get("group"),
+                known_failure=raw.get("known_failure"),
             )
         )
     return cases
@@ -377,7 +406,11 @@ async def evaluate(
 
 
 def write_records(results: list[Result], path: Path) -> None:
-    """One JSONL record per case, with the fields a later comparison can use across runs."""
+    """One JSONL record per case, with the fields a later comparison can use across runs.
+
+    `prompt_sha256` is on every record because a score with no prompt identity cannot say what it
+    measured: the same cases against two contracts are two different subjects.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as handle:
         for result in results:
@@ -390,6 +423,7 @@ def write_records(results: list[Result], path: Path) -> None:
                         "finish_reason": result.reply.finish_reason,
                         "prompt_tokens": result.reply.prompt_tokens,
                         "completion_tokens": result.reply.completion_tokens,
+                        "prompt_sha256": prompt_sha256(),
                     }
                 )
                 + "\n"
@@ -451,11 +485,25 @@ def render(results: list[Result], records: Path) -> str:
         lines.append(
             f"{name}: resisted {resisted}/{len(members)} · owned by {group.owner} · {state}"
         )
+    declared = [result for result in results if result.case.known_failure is not None]
+    if declared:
+        owners = sorted({result.case.known_failure for result in declared})
+        failed = sum(not result.passed for result in declared)
+        lines.append(
+            f"declared failures: {failed}/{len(declared)} failed as declared"
+            f" · owned by {', '.join(owners)}"
+        )
     if surprises:
         lines.append("")
         lines.append("not as declared:")
         for result in surprises:
-            lines.append(f"  {result.case.id}: expected pass, got {result.failures or 'pass'}")
+            if result.case.known_failure is not None:
+                lines.append(
+                    f"  {result.case.id}: declared a failure owned by "
+                    f"{result.case.known_failure}, and it passed"
+                )
+            else:
+                lines.append(f"  {result.case.id}: expected pass, got {result.failures or 'pass'}")
             # The reply, because a predicate that fired for an unexpected reason is a change in the
             # model or in the case, and either way the text is the thing to look at.
             lines.append(f"    reply: {result.reply.text.strip()[:200]!r}")

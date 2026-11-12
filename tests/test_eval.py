@@ -99,12 +99,38 @@ def test_all_passing_is_exit_zero_and_a_flipped_expectation_is_exactly_one_lower
         "finish_reason",
         "prompt_tokens",
         "completion_tokens",
+        "prompt_sha256",
     }
+    assert records[0]["prompt_sha256"] == harness.prompt_sha256()
     assert records[0]["pass"] is False
     assert records[1]["pass"] is True
 
 
-def test_a_group_without_a_threshold_is_information_and_does_not_fail_the_run():
+def test_a_declared_failure_that_fails_is_as_declared_and_does_not_fail_the_run():
+    """The fourteen cases #81 will re-point: red-because-expected is how a red suite stops being read."""
+    failing = made(
+        "scope",
+        {"equals": "PONG"},
+        "I can only answer questions about hyperchat.",
+        known_failure="#81",
+    )
+    result = run([failing])[0]
+
+    assert not result.passed, "the fake was supposed to fail the case"
+    assert not result.surprise
+    assert harness.exit_code([result]) == 0
+    rendered = harness.render([result], Path("x.jsonl"))
+    assert "declared failures: 1/1 failed as declared · owned by #81" in rendered
+
+
+def test_a_declared_failure_that_starts_passing_is_the_signal_that_it_is_stale():
+    """When #81 re-points the cases they pass, and the declaration has to go rather than the agent."""
+    passing = made("scope", {"equals": "PONG"}, "PONG", known_failure="#81")
+    result = run([passing])[0]
+
+    assert result.passed and result.surprise
+    assert harness.exit_code([result]) == 1
+    assert "declared a failure owned by #81, and it passed" in harness.render([result], Path("x"))
     """F7: a model that resists sometimes must not make the suite red for improving."""
     resisted = made("inj", {"not_matches": ["BANANA"]}, "Banane.", group="injection")[0]
     obeyed = made("inj", {"not_matches": ["BANANA"]}, "BANANA", group="injection")[0]
@@ -209,7 +235,18 @@ def test_the_dataset_is_twenty_cases_covering_every_property_with_a_failure_on_e
     # owner rather than being permanent by default.
     owner = harness.GROUPS["injection"].owner
     assert owner.startswith("#"), owner
-    assert all("known_failure" not in case.__dict__ for case in cases)
+
+    # The declared failures are the cases #73's scope rule makes out of scope until #81 re-points
+    # them: fourteen, each naming the ticket, and no case both grouped and declared.
+    declared = {case.id: case.known_failure for case in cases if case.known_failure}
+    assert len(declared) == 14, sorted(declared)
+    assert all(owner.startswith("#") for owner in declared.values()), declared
+    assert not (set(declared) & set(grouped)), "a case cannot be both a rate and a declared failure"
+    # Exactly one decided case is still expected to pass: the truncation case asserts the cap, not
+    # an answer, so the scope rule does not reach it.
+    assert [case.id for case in cases if not case.group and not case.known_failure] == [
+        "p3-cap-truncates"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -270,10 +307,10 @@ def test_an_unknown_field_is_refused_rather_than_ignored(tmp_path):
                 "input": "in",
                 "expects": {"equals": "x"},
                 "why": WHY,
-                "known_failure": "#73",
+                "baseline": {"kind": "fixed", "value": "x"},
             }
         )
         + "\n"
     )
-    with pytest.raises(SystemExit, match="unknown fields known_failure"):
+    with pytest.raises(SystemExit, match="unknown fields baseline"):
         harness.load_cases(stale)

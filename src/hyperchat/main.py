@@ -28,7 +28,14 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
-from hyperchat.agent import NotConfigured, ProviderFailed, close_model, get_model, graph
+from hyperchat.agent import (
+    NotConfigured,
+    ProviderFailed,
+    close_model,
+    get_model,
+    graph,
+    prompt_sha256,
+)
 from hyperchat.auth import AuthError, Caller, NotAllowedError, UpstreamError, verify_token
 from hyperchat.config import load_settings
 
@@ -52,6 +59,11 @@ async def lifespan(_app: FastAPI):
     request, so there is nothing to be rejected yet: that failure waits for the first call, where it
     is the 502 any provider failure is.
     """
+    # The contract's identity, once per process. A log line that cannot be tied to the text it was
+    # produced under says nothing about what answered, and the eval records the same hash for the
+    # same reason. `INFO`, so it is visible where the level is at INFO rather than uvicorn's default.
+    logger.info("agent contract prompt_sha256=%s", prompt_sha256())
+
     try:
         get_model()
     except NotConfigured:

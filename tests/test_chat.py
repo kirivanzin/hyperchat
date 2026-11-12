@@ -8,8 +8,10 @@ work: a real `ChatDeepSeek` pointed at an `httpx.MockTransport`, which is the on
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+from pathlib import Path
 
 import httpx
 import pytest
@@ -53,12 +55,20 @@ def recorded_model(seen: list[dict], **overrides) -> ChatDeepSeek:
         return httpx.Response(200, json=REPLY)
 
     transport = httpx.MockTransport(handler)
-    return ChatDeepSeek(
-        model="deepseek-chat",
-        api_key="test-key",
-        http_async_client=httpx.AsyncClient(transport=transport),
-        **overrides,
-    )
+    settings = {"model": "deepseek-chat", "api_key": "test-key"}
+    settings.update(overrides)
+    return ChatDeepSeek(**settings, http_async_client=httpx.AsyncClient(transport=transport))
+
+
+def wired_model(monkeypatch, seen: list[dict]) -> None:
+    """Let `get_model()` build the real configured client, over a transport that records it.
+
+    The point is to assert what `get_model` puts on the wire — the temperature it passes and the
+    contract it is given — rather than what a test constructs by hand.
+    """
+    monkeypatch.setattr(agent, "_model", None)
+    monkeypatch.setenv("PROVIDER_API_KEY", "test-key")
+    monkeypatch.setattr(agent, "ChatDeepSeek", lambda **kwargs: recorded_model(seen, **kwargs))
 
 
 def test_chat_is_behind_the_boundary_before_it_is_behind_the_model():
@@ -112,7 +122,101 @@ def test_the_prompt_reaches_the_model_unchanged(caller, monkeypatch):
 
     client.post("/api/chat", json={"message": "say ok"})
 
-    assert seen[0]["messages"] == [{"content": "say ok", "role": "user"}]
+    assert seen[0]["messages"][-1] == {"content": "say ok", "role": "user"}
+
+
+# --- the contract, on the wire -------------------------------------------------------------------
+
+
+def test_the_contract_is_the_first_message_on_the_wire(caller, monkeypatch):
+    """The system prompt is prepended per call, so a caller cannot omit it."""
+    seen: list[dict] = []
+    wired_model(monkeypatch, seen)
+
+    client.post("/api/chat", json={"message": "say ok"})
+
+    assert seen[0]["messages"][0] == {"content": agent.SYSTEM_PROMPT, "role": "system"}
+    assert [message["role"] for message in seen[0]["messages"]] == ["system", "user"]
+
+
+def test_the_contract_is_not_written_into_state(caller, monkeypatch):
+    """A system message in `MessagesState` is one a caller could append to, which is why it is not."""
+    # The messages handed to the model, not the graph's state: the test is about what goes on the
+    # wire, and calling that "state" is how a reader ends up checking the wrong half.
+    wire: list = []
+
+    class Recorder:
+        async def ainvoke(self, messages, **_kwargs):
+            wire[:] = list(messages)
+            return AIMessage(content="ok")
+
+    async def node():
+        return await agent.call_model({"messages": [HumanMessage("hi")]}, {})
+
+    monkeypatch.setattr(agent, "_model", Recorder())
+    result = asyncio.run(node())
+
+    assert wire[0].type == "system"
+    assert [message.type for message in result["messages"]] == ["ai"]
+
+
+def test_the_temperature_on_the_wire_is_pinned_not_inherited(caller, monkeypatch):
+    """`temperature` is the provider's default unless this repository says otherwise; it says 0.0."""
+    seen: list[dict] = []
+    monkeypatch.delenv("PROVIDER_TEMPERATURE", raising=False)
+    wired_model(monkeypatch, seen)
+
+    client.post("/api/chat", json={"message": "say ok"})
+
+    assert seen[0]["temperature"] == 0.0
+
+
+def test_the_temperature_override_reaches_the_wire(caller, monkeypatch):
+    seen: list[dict] = []
+    monkeypatch.setenv("PROVIDER_TEMPERATURE", "0.7")
+    wired_model(monkeypatch, seen)
+
+    client.post("/api/chat", json={"message": "say ok"})
+
+    assert seen[0]["temperature"] == 0.7
+
+
+def test_a_temperature_outside_the_providers_range_is_refused(monkeypatch):
+    monkeypatch.setenv("PROVIDER_TEMPERATURE", "3")
+    with pytest.raises(RuntimeError, match="outside 0.0-2.0"):
+        provider_settings()
+
+
+def test_the_prompt_hash_is_logged_once_at_startup(monkeypatch, caplog):
+    """One line at boot, carrying the same hash the eval records: the subject of the measurement."""
+    from hyperchat.main import api as app
+    from hyperchat.main import lifespan
+
+    monkeypatch.delenv("PROVIDER_API_KEY", raising=False)
+    monkeypatch.setattr(agent, "_model", None)
+    caplog.set_level(logging.INFO, logger="hyperchat")
+
+    async def start() -> None:
+        async with lifespan(app):
+            pass
+
+    asyncio.run(start())
+
+    lines = [r.getMessage() for r in caplog.records if "prompt_sha256" in r.getMessage()]
+    assert len(lines) == 1, lines
+    assert agent.prompt_sha256() in lines[0]
+
+
+def test_the_package_readme_states_the_prompt_the_code_sends():
+    """The contract is in two places on purpose; a copy that drifts is the defect this repository
+    treats as documentation. Changing the prompt means changing both, in one commit."""
+    readme = (Path(__file__).resolve().parents[1] / "src/hyperchat/README.md").read_text()
+    assert agent.SYSTEM_PROMPT.strip() in readme
+
+
+def test_the_prompt_hash_is_computed_from_the_prompt():
+    assert agent.prompt_sha256() == hashlib.sha256(agent.SYSTEM_PROMPT.encode()).hexdigest()
+    assert len(agent.prompt_sha256()) == 64
 
 
 # --- the three answers ----------------------------------------------------------------------------
