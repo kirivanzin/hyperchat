@@ -251,6 +251,12 @@ registry-verify: ## Show the deployed image and the registry digest for TAG (nee
 	@gcloud artifacts docker images describe "$(REMOTE)" \
 		--project=$(PROJECT) --format='value(image_summary.digest)'
 
+# Empty on purpose, so `make deploy` from a terminal shows the plan and waits for the answer. CI has
+# no stdin to answer that prompt with: the first appended dispatch sat on it holding the state lock
+# until it was cancelled. There the approval is the merge, or the dispatch itself, so the workflow
+# sets this to -auto-approve.
+AUTO_APPROVE ?=
+
 # The secret version is an ordinary resource now, so secret -> version -> grant -> service is one
 # dependency graph rather than three interleaved commands. The value is write-only and arrives as
 # TF_VAR_provider_api_key from the token file outside the checkout.
@@ -296,7 +302,7 @@ deploy: ## Deploy this commit's image, secret version and service to Cloud Run i
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
 		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false $(BACKEND); \
-		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) apply -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)"
+		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) apply -input=false $(AUTO_APPROVE) -var="project=$(PROJECT)" -var="image=$(REMOTE)"
 
 smoke: ## Assert the deployed probes and both auth directions (needs gcloud for a token)
 	@[ -n "$(APP_URL)" ] || { \

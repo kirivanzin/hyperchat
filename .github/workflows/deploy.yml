@@ -54,6 +54,10 @@ jobs:
       # `terraform/app` requires this and has no default. It is the deployed allowlist, so it is the
       # input, never `.env`.
       TF_VAR_allowed_subs: ${{ inputs.allowed_subs }}
+      # There is nobody here to answer `terraform apply`'s approval prompt, and a runner's stdin does
+      # not close: the dispatch before this one sat on that prompt holding the state lock until it was
+      # cancelled. The approval in this workflow is the human who dispatched it.
+      AUTO_APPROVE: -auto-approve
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
