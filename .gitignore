@@ -43,5 +43,9 @@ terraform.tfvars
 # Named here so no clone can commit one: the file is local, and `.gitignore` is the part that travels.
 AGENTS.md
 
+# The eval harness's records: one run's numbers, written beside the dataset and never published.
+# A committed results file would be a score from an old model reported as today's.
+evals/results.jsonl
+
 .DS_Store
 .zed/
