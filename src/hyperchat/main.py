@@ -44,9 +44,13 @@ logger = logging.getLogger("hyperchat")
 async def lifespan(_app: FastAPI):
     """The provider client lives as long as the process: built here, closed on shutdown.
 
-    Building it at startup rather than on the first request means a bad key is a log line at boot
-    instead of a slow first call. It does not fail the boot: an unset key is "the model is off", and
-    `/api/chat` says 503 when it is.
+    Building it at startup rather than on the first request is what moves an *unset* key to boot,
+    where it is a log line instead of a 503 somebody finds later. It does not fail the boot: an unset
+    key is "the model is off", and `/api/chat` says 503 when it is.
+
+    A key that is present but *wrong* is not visible here at all. Constructing a client makes no
+    request, so there is nothing to be rejected yet: that failure waits for the first call, where it
+    is the 502 any provider failure is.
     """
     try:
         get_model()
