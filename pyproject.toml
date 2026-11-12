@@ -41,3 +41,7 @@ filterwarnings = ["error"]
 # The code is written to ~100 columns already; 88 is ruff's default and would fight every comment.
 line-length = 100
 target-version = "py313"
+# No `select` on purpose. ruff's default set is broader than E/F and includes rules that have already
+# earned their place here: PLW1510 caught a `subprocess.run` whose caller asserts on `returncode`, and
+# narrowing the selection to the familiar families would have silently disabled it. Adding a `select`
+# should be a decision with a reason, not a tidying.

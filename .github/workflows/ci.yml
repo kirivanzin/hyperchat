@@ -21,6 +21,9 @@ jobs:
     # than by tag: the same argument as the digest-pinned images, at the scale where it applies. These
     # steps run with this repository's token, so a moved tag is a supply-chain change to a thing that
     # only ever runs tests.
+    # Ten minutes for a job whose slowest step is a cached build. The default is six hours, so a
+    # stalled registry pull would hold a runner for all of it — a wedged check rather than a red one.
+    timeout-minutes: 10
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,4 +65,15 @@ jobs:
         # It is here because "does the Dockerfile still build" was, for three pull requests in a row,
         # the one claim that rested on the owner's laptop. `make build` rather than a duplicate
         # `docker build` line, so CI and a human run the same command.
-        run: make build
+        #
+        # `TAG=ci`, because the default is `git rev-parse --short HEAD` and on `pull_request` that is
+        # the synthetic merge commit GitHub constructs for the ref — a commit that is not in this
+        # repository and changes on every push to the branch. A tag that names a commit which does not
+        # exist is a provenance claim that is false, and the README's "the tag is the commit" would
+        # stop being true the day this job published anything. The run already records the head SHA;
+        # the image does not need to repeat it.
+        #
+        # A 429 from Docker Hub here is not a defect in the change: `--pull` runs on shared runner IPs
+        # against the anonymous per-IP limit. If this step fails with nothing else red, look at the
+        # registry before the Dockerfile.
+        run: make build TAG=ci

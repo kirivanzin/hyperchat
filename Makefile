@@ -43,7 +43,7 @@ info: ## Print what the next command will use, before it uses it
 	@printf '  tag         %s\n' "$(TAG)"
 	@printf '  push to     %s\n' "$(if $(PROJECT),$(REMOTE),<unset>)"
 
-lint: ## Check formatting and lint (no network, no credentials)
+lint: ## Check formatting and lint (no credentials; ruff itself comes from PyPI)
 	@uv run ruff format --check . && uv run ruff check --output-format=concise .
 
 test: ## Run the tests
