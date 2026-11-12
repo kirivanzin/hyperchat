@@ -28,7 +28,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 .DEFAULT_GOAL := help
 
 .PHONY: help info test build run stop github github-plan github-create github-remote \
-        github-apply github-verify registry-plan registry-apply login push registry-verify
+        github-apply github-status registry-plan registry-apply login push registry-verify
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -89,7 +89,7 @@ github-apply: ## Apply the rest, so branch protection lands once the branch exis
 	$(TERRAFORM_GITHUB) init -input=false
 	$(TERRAFORM_GITHUB) apply -input=false
 
-github-verify: ## Show the repository settings and the protection that exist
+github-status: ## Print the live repository settings and protection. An observation, not a check
 	@[ -n "$(FULL_NAME)" ] || { \
 		echo "FULL_NAME is unset: no applied state in terraform/github." >&2; \
 		echo "run 'make github-create' once, or pass FULL_NAME=owner/name" >&2; \
