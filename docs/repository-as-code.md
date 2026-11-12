@@ -14,9 +14,11 @@ of guessing at one.
   **no** required reviewers and **no** required checks
 
 Two absences are choices, not gaps. One account cannot approve its own pull request, so a required
-approval blocks every merge; and there is no CI here, so a required check that never reports blocks
-every merge in the same way. Both become correct on the day there is a second identity and a job to
-require.
+approval blocks every merge. And `.github/workflows/ci.yml` reports on every pull request but is
+deliberately not required: a check that has never been seen to fail can block every merge without
+saying why, so it is added first, watched green and red on a real pull request, and required
+afterwards. Required reviewers become correct on the day there is a second identity; a required check
+becomes correct the day it has a history. Both are follow-ups with a reason, not omissions.
 
 `github_branch_protection` rather than a `github_repository_ruleset`: a ruleset is the newer
 mechanism and has more of them — `conditions`, `bypass_actors`, and one block per rule — where the
@@ -44,7 +46,9 @@ and indexed by tools that were never asked to keep a secret.
 
 **Not in CI.** A workflow that can change repository settings is a workflow whose next modification
 can change repository settings. Nothing here needs it: `make push` uses the registry credential and
-`make github-status` uses the ordinary `gh` auth, neither of which is this token.
+`make github-status` uses the ordinary `gh` auth, neither of which is this token. The workflow that
+now exists runs the tests and `terraform validate` with `contents: read`, so it can be read to confirm
+this rather than trusted: no step in it names a secret.
 
 **Not needed to look.** `make github-status` reads the live API through `gh`, so seeing what the
 repository is actually set to does not depend on the powerful credential being present, or on
