@@ -102,24 +102,72 @@ That last absence is the point. Git goes over SSH from step 5, so the token neve
 as a git password, and a token that cannot push code is a much smaller thing to leak than one that
 can. It is also why the two credentials are worth having separately at all.
 
-## 7. Tell git who it is
+## 7. Three identities, and only one of them is `user.name`
 
-So commits link to the account rather than showing as an unknown author:
+This is where the two accounts clash, and configuring the obvious one looks like solving it. There
+are three separate things, and they are set in three separate places:
+
+| What | Set by | When it is wrong |
+|---|---|---|
+| Commit author and committer | `user.name` / `user.email` | commits attributed to you — visible, embarrassing |
+| Transport, i.e. who pushes | SSH key or remote URL | the agent's branch pushed with your credential |
+| API, i.e. who opens pull requests and comments | `GH_TOKEN` / `gh auth` | the pull request or the approval is yours — **silent**, and it defeats the point |
+
+A repository-local `user.name` already beats `~/.gitconfig`, so the commit identity is not a
+precedence problem; it is a remembering problem, and the fix is to make the identity a property of
+the directory. Give the agent its own checkout and let the path decide:
 
 ```sh
-git config user.name "<the login>"
-git config user.email "<the id>+<the login>@users.noreply.github.com"
+git clone git@github-agent:saxeum/hyperchat.git ~/soper/agent/hyperchat
 ```
 
-and point the remote at the alias from step 5:
+```
+# ~/.gitconfig
+[includeIf "gitdir:~/soper/agent/"]
+	path = ~/.gitconfig-agent
+```
+
+```
+# ~/.gitconfig-agent
+[user]
+	name = <the login>
+	email = <the id>+<the login>@users.noreply.github.com
+[core]
+	sshCommand = ssh -i ~/.ssh/hyperchat-agent -o IdentitiesOnly=yes -o IdentityAgent=none
+[credential]
+	helper =
+```
+
+The trailing slash makes `gitdir:` a prefix match. The `sshCommand` line means a clone made with the
+wrong remote URL still pushes as the agent. The empty `credential.helper` **clears** an inherited
+helper — if `~/.gitconfig` sets `helper = store`, a plaintext credential cache holding the other
+account's token would otherwise be offered on this one's behalf, successfully and silently.
+
+**A separate clone, not a linked worktree.** `gitdir:` matches the *git* directory, and a linked
+worktree's is `<main>/.git/worktrees/<name>`, not its working path — a rule for `~/soper/agent/`
+will not fire there. Worktrees need `extensions.worktreeConfig true` and `git config --worktree`
+instead, which is more parts for the same result.
+
+### Prove it before committing, not after
 
 ```sh
-git remote set-url origin git@github-agent:saxeum/hyperchat.git
+git -C ~/soper/agent/hyperchat var GIT_AUTHOR_IDENT
+git -C ~/soper/hyperchat var GIT_AUTHOR_IDENT
 ```
+
+print the two different identities, with every include resolved. That is the command to reach for
+whenever a commit lands under the wrong name.
+
+### What no configuration can fix
+
+- **A stale `GH_TOKEN` in the shell.** It overrides `gh auth`, so `gh` can act as the agent while git
+  acts as you. Nothing in git config can see it.
+- **`git commit --author=`** changes the author and leaves you as committer.
+- **One directory.** If both identities commit in the same tree, no config can tell them apart; only
+  per-command `GIT_AUTHOR_*` and `GIT_COMMITTER_*` can, which is the answer that depends on never
+  forgetting.
 
 ## 8. Let Terraform record the grant
-
-The account exists, so the one resource that was waiting for it can be applied:
 
 ```sh
 echo 'agent_username = "<the login>"' >> terraform/github/terraform.tfvars
@@ -129,14 +177,28 @@ echo 'agent_username = "<the login>"' >> terraform/github/terraform.tfvars
 make github-apply
 ```
 
-That writes an invitation. Accept it as the agent:
+That writes an invitation — and a written invitation is the *third* state in issue #4, not a grant.
+`github_repository_collaborator` reports success when the invite is sent, so `terraform plan` saying
+no changes cannot tell you the agent has access. The two lists that can:
 
 ```sh
-GH_TOKEN=<the token> gh api /user/repository_invitations --jq '.[].id'
+gh api /repos/saxeum/hyperchat/invitations --jq '.[] | {id, invitee: .invitee.login, permissions}'
 ```
 
-prints an id, and `PATCH /user/repository_invitations/<id>` accepts it. Accepting through the email
-link does the same thing.
+names the outstanding invitation, and
+
+```sh
+gh api '/repos/saxeum/hyperchat/collaborators?affiliation=outside' --jq '[.[].login]'
+```
+
+stays empty until it is accepted. Accept it as the agent, which is the first thing the token from
+step 6 is for:
+
+```sh
+GH_TOKEN=<the token> gh api -X PATCH /user/repository_invitations/<id>
+```
+
+Accepting through the email link does the same thing.
 
 ## 9. Prove it, in the places that matter
 
@@ -161,6 +223,17 @@ gh api /orgs/saxeum --jq .plan.filled_seats
 still prints `1`. An outside collaborator on a public repository does not consume a seat; if this
 ever reads `2`, the account was added as an organisation member instead and the invitation should be
 withdrawn.
+
+## Two files, and one of them is not a credential
+
+The account's own details are kept in `.agent.idenity` — the username, the numeric id, and the
+public half of the SSH key, straight from `gh api /user`. It is **not** a credential and it is still
+git-ignored: it names an identity, and this repository is public.
+
+The spelling is wrong, and `.gitignore` carries both spellings so that fixing the name later does
+not quietly start publishing it. If a file like this ever turns up as untracked anyway, check
+`core.excludesfile` before doubting the `.gitignore`: on this machine it pointed at a macOS path that
+does not exist, so the global ignore file had never applied to anything.
 
 ## What this costs
 
