@@ -56,7 +56,7 @@ that proves the negative direction, and a history that does not need rewriting.
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | Artifact Registry, the three project APIs, and the deployer identity. Applied once, by hand. |
 | `terraform/app` | Cloud Run, the runtime identity, the provider secret. Applied by a merge. |
-| `evals/` | The case set `make eval` scores, and the baseline it is scored against. |
+| `evals/` | The case set `make eval` scores, with two non-model baselines beside it. |
 | `.github/workflows/ci.yml` | Lint, tests, `terraform validate`, and a build that is discarded. |
 | `.github/workflows/deploy.yml` | Deploy a successful `main` build; prove a non-main ref cannot authenticate. |
 | `docs/` | `authentication.md`, `repository-as-code.md`, `contributor.md`. The contributor's setup steps are `contributor-runbook.md`. |

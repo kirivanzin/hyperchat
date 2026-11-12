@@ -21,16 +21,18 @@ Four decisions worth naming, because each one is a rule this file would otherwis
   sets `PROVIDER_MAX_TOKENS` and rebuilds the client, so `provider_settings()` and `get_model()` are
   what apply it. `PROVIDER_MAX_TOKENS` in the environment is overridden rather than inherited, so a
   run is pinned to the dataset instead of to whoever's shell it started in.
-- **A declared failure is not a surprise.** `known_failure` marks a case whose `expects` is the
-  right thing to want and the wrong thing to expect today — the injection cases, until there is a
-  policy layer. The exit code answers one question: did every case come out as declared? A known
-  failure that starts passing is a surprise too, because the dataset then says something false.
+- **A declared failure is not a surprise, and it has an owner.** `known_failure` holds the ticket
+  that plans to fix it — `"#73"` today — rather than `true`, because an accepted failure with no
+  ticket named is permanent by default. The exit code answers one question: did every case come out
+  as declared? A known failure that starts passing is a surprise too, because the dataset then says
+  something false. The summary prints the owning tickets so the count is visible rather than
+  remembered.
 
-The baseline is the other half of the number. For each case it is the simplest non-model answer that
-could pass — a fixed string, a regex over the input, an echo — evaluated by the same predicate, and
-it is computed without touching the provider. Where the baseline and the model agree, the case
-carries no signal; the two numbers beside each other are what says so, and a case whose baseline
-passes is a case a human wrote the answer into.
+The baselines are the other half of the number, and they are *strategies*, not per-case answers. A
+per-case baseline can carry the expected answer — the first version of this dataset did exactly
+that, and then the figure beside the model's was a key rather than a comparison. These see only the
+input and are scored by each case's own predicate, so a case either strategy wins is a case a
+non-model answer can win, which is worth seeing rather than baking in.
 
 `make eval` is a local command: CI has no provider key and no network to one. `tests/test_eval.py`
 runs this file's judgement against a fixed reply function, which is how the falsifiability claim is
@@ -80,14 +82,15 @@ class Case:
     input: str
     expects: dict[str, Any]
     why: str
-    baseline: dict[str, Any]
     max_tokens: int | None = None
-    known_failure: bool = False
+    # The ticket that plans to fix this, not a boolean: an accepted failure that names no work is
+    # permanent by default.
+    known_failure: str | None = None
 
     @property
     def expected(self) -> bool:
         """Whether this case is meant to pass today."""
-        return not self.known_failure
+        return self.known_failure is None
 
 
 @dataclass(frozen=True)
@@ -131,7 +134,7 @@ def load_cases(path: Path) -> list[Case]:
             raw = json.loads(line)
         except json.JSONDecodeError as exc:
             raise SystemExit(f"{path}:{number}: not JSON: {exc}") from None
-        missing = {"id", "input", "expects", "why", "baseline"} - raw.keys()
+        missing = {"id", "input", "expects", "why"} - raw.keys()
         if missing:
             raise SystemExit(f"{path}:{number}: missing {', '.join(sorted(missing))}")
         cases.append(
@@ -140,9 +143,8 @@ def load_cases(path: Path) -> list[Case]:
                 input=raw["input"],
                 expects=raw["expects"],
                 why=raw["why"],
-                baseline=raw["baseline"],
                 max_tokens=raw.get("max_tokens"),
-                known_failure=bool(raw.get("known_failure", False)),
+                known_failure=raw.get("known_failure"),
             )
         )
     return cases
@@ -264,24 +266,26 @@ def check(expects: dict[str, Any], reply: Reply) -> tuple[str, ...]:
     return tuple(failures)
 
 
-# --- the baseline ------------------------------------------------------------------------------
+# --- the baselines -----------------------------------------------------------------------------
+
+# Each strategy is a function of the *input* only, which is the whole point: it cannot know what the
+# case expects, because the expectation is not in its argument. They are declared together rather
+# than per case so the score beside the model's is a comparison between answers and not an answer
+# key distributed through the dataset.
+BASELINES: dict[str, Callable[[Case], str]] = {
+    # The shape of a safe non-answer. It wins every case a refusal satisfies — the honesty cases —
+    # and loses every case that asks for work, which is what a refusal costs.
+    "constant": lambda _case: "I don't know.",
+    # Extraction without comprehension: every capitalised token in the input, concatenated. It wins
+    # `p1-exact-serial` because the answer is in the input and `p1-exact-number` cannot be, which is
+    # the difference between reading a string and doing arithmetic.
+    "regex": lambda case: " ".join(re.findall(r"\b[A-Z]{2,}(?:-\d+)?\b", case.input)),
+}
 
 
-def baseline_reply(case: Case) -> Reply:
-    """The simplest non-model answer that could pass this case. No provider, no key, no network."""
-    kind = case.baseline["kind"]
-    if kind == "fixed":
-        text = case.baseline["value"]
-    elif kind == "echo":
-        text = case.input
-    elif kind == "empty":
-        text = ""
-    elif kind == "regex":
-        match = re.search(case.baseline["pattern"], case.input)
-        text = match.group(0) if match else ""
-    else:
-        raise SystemExit(f"{case.id}: unknown baseline kind {kind!r}")
-    return Reply(text=text)
+def baseline_reply(case: Case, strategy: Callable[[Case], str]) -> Reply:
+    """One strategy's answer to one case. No provider, no key, no network."""
+    return Reply(text=strategy(case))
 
 
 # --- the run -----------------------------------------------------------------------------------
@@ -355,24 +359,34 @@ def write_records(results: list[Result], path: Path) -> None:
 
 
 def render(results: list[Result], records: Path) -> str:
-    """The whole run on one screen: twenty rows, then the number this ticket exists for."""
-    baselines = {
-        result.case.id: not check(result.case.expects, baseline_reply(result.case))
-        for result in results
+    """The whole run on one screen: twenty rows, then the numbers this ticket exists for."""
+    # Whether each strategy won each case, computed once from the case and the input alone.
+    won = {
+        name: {
+            result.case.id: not check(result.case.expects, baseline_reply(result.case, strategy))
+            for result in results
+        }
+        for name, strategy in BASELINES.items()
     }
-    lines = [f"{'id':<24} {'model':<7} {'base':<6} {'ms':>5} {'out':>4}  finish"]
+    lines = [
+        f"{'id':<24} {'model':<7} "
+        + " ".join(f"{name:<7}" for name in BASELINES)
+        + f" {'ms':>5} {'out':>4}  finish"
+    ]
     for result in results:
         out = result.reply.completion_tokens
+        columns = " ".join(
+            f"{'pass' if won[name][result.case.id] else 'fail':<7}" for name in BASELINES
+        )
         lines.append(
-            f"{result.case.id:<24} {'pass' if result.passed else 'FAIL':<7} "
-            f"{'pass' if baselines[result.case.id] else 'fail':<6} {result.reply.latency_ms:>5} "
-            f"{out if out is not None else '-':>4}  {result.reply.finish_reason or '-'}"
+            f"{result.case.id:<24} {'pass' if result.passed else 'FAIL':<7} {columns} "
+            f"{result.reply.latency_ms:>5} {out if out is not None else '-':>4}"
+            f"  {result.reply.finish_reason or '-'}"
         )
 
     model = sum(result.passed for result in results)
-    baseline = sum(baselines.values())
     total = len(results)
-    agree = sum(result.passed == baselines[result.case.id] for result in results)
+    neither = sum(not any(won[name][result.case.id] for name in BASELINES) for result in results)
     known = [result for result in results if not result.case.expected]
     surprises = [result for result in results if result.surprise]
     try:
@@ -381,12 +395,14 @@ def render(results: list[Result], records: Path) -> str:
         label = records
 
     lines.append("")
+    scores = " · ".join(f"{name} {sum(won[name].values())}/{total}" for name in BASELINES)
     lines.append(
-        f"{total} cases · model {model}/{total} · baseline {baseline}/{total} "
-        f"· {agree} carry no signal · {label}"
+        f"{total} cases · model {model}/{total} · {scores} · {neither} win neither · {label}"
     )
+    owners = sorted({result.case.known_failure for result in known if result.case.known_failure})
     lines.append(
         f"declared failures: {sum(not r.passed for r in known)}/{len(known)} failed as declared"
+        + (f", owned by {', '.join(owners)}" if owners else "")
     )
     if surprises:
         lines.append("")
