@@ -30,7 +30,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help info lint test build dev run stop token github github-plan github-create github-remote \
+.PHONY: help info lint test build dev run stop token chat github github-plan github-create github-remote \
         github-apply github-status registry-plan registry-apply login push registry-status
 
 help: ## Show this help
@@ -64,6 +64,16 @@ run: ## Run the image on PORT, with .env passed in so the fail-closed config is 
 
 token: ## Print a Google ID token for EXPECTED_AUDIENCE (needs gcloud, logged in as a user)
 	@scripts/token.sh
+
+# The same graph the endpoint serves, run directly: no HTTP and no token, because authentication is a
+# property of the route rather than of the graph. This is the debugging tool, and it is the object
+# that runs in the service rather than a second implementation of it.
+#
+# `$$MESSAGE` is deliberate: make turns `$$` into `$`, leaving the shell to expand `$MESSAGE` at run
+# time. `$(MESSAGE)` would have make expand the value first, so `$HOME` or `$5` inside the message
+# would be eaten before Python saw it. MESSAGE belongs in the environment, not in make's arguments.
+chat: ## One message from MESSAGE in the environment through the graph (reads .env; needs PROVIDER_API_KEY)
+	@set -a; [ -f .env ] && . ./.env; set +a; uv run python -m hyperchat.chat "$$MESSAGE"
 
 stop: ## Stop the running container
 	@docker stop $(IMAGE) 2>/dev/null || true

@@ -7,7 +7,8 @@ still true when there are fifty of them. No service runs yet.
 
 | Path | What it is |
 |---|---|
-| `src/hyperchat/` | The app: `main.py` the routes, `auth.py` the trust boundary, `config.py` the two values it will not start without. |
+| `src/hyperchat/` | The app: `main.py` the routes, `auth.py` the trust boundary, `agent.py` the model call as a graph, `config.py` what it needs to start and what it needs to think. |
+| `src/hyperchat/chat.py` | `make chat`: one message through the same graph, no HTTP. |
 | `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, no cache reused across builds. |
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
@@ -73,6 +74,25 @@ The app reads `EXPECTED_AUDIENCE` and `ALLOWED_SUBS` and **refuses to start with
 read by the `Makefile`, not by the application, so a missing value is a crash at import naming what is
 missing. `docs/authentication.md` has the checks, the status codes, and the cost.
 
+## Asking the model something
+
+`/api/chat` sends one message through a `langgraph` graph with one node, and returns the reply. Two
+bounds keep one call from becoming an expensive one by accident: the input is capped at 4000
+characters before any provider call, and the output cap is a number in `.env` that goes on the wire
+by name:
+
+```sh
+MESSAGE='Reply with exactly: ok' make chat
+PROVIDER_MAX_TOKENS=5 MESSAGE='Count from one to fifty.' make chat
+```
+
+`make chat` runs the same `graph` object the endpoint awaits — no HTTP, no token — because a debugging
+tool that is a second implementation is a tool that drifts. It needs `PROVIDER_API_KEY` in `.env`; the
+endpoint answers **503** when that is absent (the model is off, not broken) and **502** when the
+provider fails, with the reason logged and not returned. An empty reply is a 502 as well: a 200 with
+no text is indistinguishable from a truncation, and the log carries `finish_reason` so the operator
+can tell a cap set too low from a provider anomaly.
+
 ## The decisions worth knowing
 
 **The tag is the commit, and tags are immutable.** A tag that can be overwritten is not provenance:
@@ -102,6 +122,12 @@ the ticket exists.
 SHA rather than by tag. It is deliberately not a required check: a check that has never been seen to
 fail can block every merge without saying why, so it is added first and required only once it has a
 history. `docs/repository-as-code.md` records why those two arrive in that order.
+
+**The graph runtime is the largest dependency here, and it is deliberate.** `langgraph`,
+`langchain-core` and `langchain-deepseek` take `uv.lock` from 30 packages to 62, and the image from 18
+to 55. #13 removed 41 by dropping a telemetry subtree; this adds a runtime back. It is worth paying
+because everything after this — streaming, the run bounds, tools — is work *on* the graph rather than
+work to introduce one.
 
 **The allowlist is the gate, not the audience.** The audience is the client id a `gcloud` user token
 carries, so anyone with a Google account can mint a token that verifies. Verification narrows that to

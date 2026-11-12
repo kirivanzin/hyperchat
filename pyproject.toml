@@ -13,6 +13,9 @@ requires-python = ">=3.13"
 # uvicorn is declared because it is now the only thing that provides the server the image runs.
 dependencies = [
     "fastapi>=0.162.2",
+    "langchain-core>=1.8.0",
+    "langchain-deepseek>=1.1.1",
+    "langgraph>=1.2.20",
     "pyjwt[crypto]>=2.15.1",
     "uvicorn>=0.54.0",
 ]
