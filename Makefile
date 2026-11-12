@@ -48,7 +48,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 
 .PHONY: help info lint test build dev run stop token chat github github-plan github-create github-remote \
         github-apply github-status registry-plan registry-apply login push \
-        registry-status registry-verify image-exists deploy-plan deploy smoke
+        registry-status registry-verify image-exists image-digest deploy-plan deploy smoke
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -230,10 +230,14 @@ registry-status: ## Print the live registry and its IAM policy. An observation, 
 # The service image is the commit tag; `make registry-verify` shows what the service is actually
 # running beside the digest that tag resolves to. It is an observation, not a check: a service can be
 # deliberately on an older tag, and the useful answer is both values rather than a pass/fail.
-image-exists: ## Exit 0 when TAG's image is in the registry, 1 when it is not. Silent, for `if`
+image-exists: ## Exit 0 when TAG's image is in the registry, 1 when it is not. Prints nothing
 	@command -v gcloud >/dev/null 2>&1 || exit 1
 	@gcloud artifacts docker images describe "$(REMOTE)" --project=$(PROJECT) \
 		--format='value(image_summary.digest)' >/dev/null 2>&1
+
+image-digest: ## Print TAG's registry digest, or fail if it was never pushed
+	@gcloud artifacts docker images describe "$(REMOTE)" --project=$(PROJECT) \
+		--format='value(image_summary.digest)'
 
 registry-verify: ## Show the deployed image and the registry digest for TAG (needs gcloud)
 	@[ -n "$(PROJECT)" ] || { \

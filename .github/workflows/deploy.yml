@@ -38,6 +38,13 @@ on:
 permissions:
   contents: read
 
+# Two dispatches must not race. They would contend on the Terraform state lock, and the second would
+# either wait or fail; a queue is the honest behaviour for a deploy, and `cancel-in-progress: false`
+# because cancelling an apply half way is how the lock had to be cleared by hand.
+concurrency:
+  group: deploy-hyperchat
+  cancel-in-progress: false
+
 jobs:
   deploy:
     # The image build is the slow step; twenty minutes bounds a stalled registry pull rather than
@@ -48,12 +55,10 @@ jobs:
       contents: read
       id-token: write
     env:
+      # Identifiers, not credentials. Both are printed by gcloud and by the actions below whatever
+      # this file does, and the project id is in every resource path the plan touches.
       PROJECT: ${{ inputs.project }}
-      ALLOWED_SUBS: ${{ inputs.allowed_subs }}
       WIF_PROVIDER: ${{ inputs.wif_provider }}
-      # `terraform/app` requires this and has no default. It is the deployed allowlist, so it is the
-      # input, never `.env`.
-      TF_VAR_allowed_subs: ${{ inputs.allowed_subs }}
       # There is nobody here to answer `terraform apply`'s approval prompt, and a runner's stdin does
       # not close: the dispatch before this one sat on that prompt holding the state lock until it was
       # cancelled. The approval in this workflow is the human who dispatched it.
@@ -63,8 +68,18 @@ jobs:
 
       - name: require configuration
         # Before anything authenticates: an empty input is a wrong invocation, not a failed deploy.
+        #
+        # The allowlist is masked before anything else uses it, because GitHub prints each step's
+        # environment in the log and this repository is public. Masking is the first command of the
+        # first step that holds the value, so at most this step's own header shows it — it cannot be
+        # removed from that header here, only from every line after it. The complete fix is an
+        # environment secret, which GitHub masks in the header too; that is #43's phase A, and this is
+        # the most that can be done while the value arrives as a dispatch input.
+        env:
+          ALLOWED_SUBS: ${{ inputs.allowed_subs }}
         run: |
           set -eu
+          echo "::add-mask::${ALLOWED_SUBS}"
           : "${PROJECT:?input project is unset}"
           : "${ALLOWED_SUBS:?input allowed_subs is unset}"
           : "${WIF_PROVIDER:?input wif_provider is unset}"
@@ -86,38 +101,43 @@ jobs:
         with:
           terraform_version: "1.17.1"
 
-      - name: is this commit's image already pushed?
-        # The tag is the commit and the registry refuses to overwrite a tag, which is the property
-        # that makes an image traceable. The consequence is that a deploy which fails *after* the
-        # push cannot be retried by re-running the job — the retry dies on `make push` before it
-        # reaches the step that failed. This makes the pipeline re-runnable without weakening the
-        # registry: if the tag is there, this commit's image is there, and pushing it again would
-        # change nothing that the tag means.
-        id: image
+      - name: which image is this commit's?
+        # Recorded either way, because `image-exists` makes the run trust a tag rather than a build:
+        # the digest in this log is the one the deploy will use, and the one to compare against what
+        # Cloud Run reports afterwards.
+        id: digest
         run: |
-          if make image-exists; then
+          set -eu
+          if digest="$(make image-digest 2>/dev/null)"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "the image for this commit is already in the registry; build and push are skipped"
+            echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+            echo "image for this commit is already published: ${digest}"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "no image for this commit yet; it will be built and pushed"
           fi
 
       - name: authenticate Docker
-        if: steps.image.outputs.exists == 'false'
+        if: steps.digest.outputs.exists == 'false'
         run: make login
 
       - name: build the image
-        if: steps.image.outputs.exists == 'false'
+        if: steps.digest.outputs.exists == 'false'
         run: make build
 
       - name: push the image
-        if: steps.image.outputs.exists == 'false'
+        if: steps.digest.outputs.exists == 'false'
         run: make push
 
       - name: deploy
         # The provider key is write-only to Terraform, not absent from the apply. Read the existing
         # Secret Manager version into this process's environment; `make deploy` passes it as
         # TF_VAR_provider_api_key and Terraform stores it neither in state nor in the plan file.
+        env:
+          # The deployed allowlist, masked by the step above. It is an environment variable because
+          # `terraform/app` needs it as TF_VAR_allowed_subs, and this is the only step that does.
+          ALLOWED_SUBS: ${{ inputs.allowed_subs }}
+          TF_VAR_allowed_subs: ${{ inputs.allowed_subs }}
         run: |
           set -eu
           PROVIDER_API_KEY="$(gcloud secrets versions access latest \
@@ -142,6 +162,9 @@ jobs:
         # A half-applied state is the failure this repository has produced twice; the plan says what
         # was left behind, and a log without it turns a page into an investigation.
         if: failure()
+        env:
+          ALLOWED_SUBS: ${{ inputs.allowed_subs }}
+          TF_VAR_allowed_subs: ${{ inputs.allowed_subs }}
         run: |
           PROVIDER_API_KEY="$(gcloud secrets versions access latest \
             --secret=provider-api-key --project="$PROJECT")" || true

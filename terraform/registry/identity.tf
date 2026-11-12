@@ -51,12 +51,28 @@ resource "google_iam_workload_identity_pool_provider" "github_hyperchat" {
   }
 
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject"         = "assertion.sub"
+    "attribute.repository"   = "assertion.repository"
+    "attribute.ref"          = "assertion.ref"
+    "attribute.workflow_ref" = "assertion.workflow_ref"
+    "attribute.event_name"   = "assertion.event_name"
   }
 
-  attribute_condition = "assertion.repository == \"saxeum/hyperchat\" && assertion.ref == \"refs/heads/main\""
+  # Repository and ref are not enough. Any workflow on `main` that asks for an OIDC token would
+  # satisfy them, including a `pull_request_target` workflow — which runs in the base repository's
+  # context with `refs/heads/main`, and can be triggered by a pull request from a fork. The file and
+  # the event are what make this the deploy workflow rather than any workflow:
+  #
+  #   * `workflow_ref` names the workflow file at a ref, so a new workflow on `main` does not inherit
+  #     this identity by existing;
+  #   * `event_name` is `workflow_dispatch` today. When #43's phase A adds `workflow_run`, this line
+  #     changes with it — a deliberate edit, not a new capability that arrived by itself.
+  attribute_condition = join(" && ", [
+    "assertion.repository == \"saxeum/hyperchat\"",
+    "assertion.ref == \"refs/heads/main\"",
+    "assertion.workflow_ref == \"saxeum/hyperchat/.github/workflows/deploy.yml@refs/heads/main\"",
+    "assertion.event_name == \"workflow_dispatch\"",
+  ])
 }
 
 # The other half: the condition decides which workflows may ask, and this decides which account they
