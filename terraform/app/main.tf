@@ -4,8 +4,9 @@ terraform {
   # State lives in the bucket the sibling project's bootstrap root owns, under a prefix of our own.
   # It is here rather than on the machine that applied last so a runner can reach and lock it;
   # #42 records what that reverses and why. `terraform init -backend=false` in CI still works.
+  # The bucket is passed by the Makefile as -backend-config, because a backend block cannot read a
+  # variable and writing it here would put the project id in the repository. The prefix is ours.
   backend "gcs" {
-    bucket = "saxeum-b9b1f-tfstate"
     prefix = "hyperchat/app"
   }
 
@@ -129,9 +130,10 @@ variable "provider_key_version" {
 }
 
 # Project-level facts with `disable_on_destroy = false`: losing them from state leaves the APIs on
-# rather than disabling a project. They live in this root, not a bootstrap one, because a bootstrap
-# here would exist to hold a state bucket and this repository keeps local state; `depends_on` is what
-# orders enablement before the resources that need it, and ordering is not a reason for a root.
+# rather than disabling a project. They sit in this root rather than a bootstrap one: `depends_on` is
+# what orders enablement before the resources that need it, ordering is not a reason for a root, and
+# the only other thing a bootstrap had to offer here was a state bucket — which this repository now
+# takes a prefix of rather than owning (#42).
 resource "google_project_service" "secretmanager" {
   project            = var.project
   service            = "secretmanager.googleapis.com"

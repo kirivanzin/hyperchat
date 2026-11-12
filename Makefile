@@ -18,8 +18,16 @@ TERRAFORM_GITHUB = terraform -chdir=terraform/github
 TERRAFORM_APP = terraform -chdir=terraform/app
 BRANCH ?= main
 # The project is read from the applied registry root rather than repeated here. Two places holding
-# the same identifier is how an image ends up in a registry that nothing reads.
-PROJECT ?= $(shell $(TERRAFORM) output -raw project 2>/dev/null)
+# the same identifier is how an image ends up in a registry that nothing reads. The registry state is
+# itself in the bucket named after the project, so before that root has been initialised the one
+# git-ignored copy in its tfvars is what answers — the same single copy, read directly.
+PROJECT ?= $(shell $(TERRAFORM) output -raw project 2>/dev/null || \
+	sed -n 's/^project *= *"\(.*\)"/\1/p' terraform/registry/terraform.tfvars 2>/dev/null)
+# The state bucket is derived from it and passed to every `init` as a partial backend configuration.
+# Written in the backend blocks instead, it would put the project id in the repository, which
+# `docs/repository-as-code.md` and README both say it is not.
+STATE_BUCKET = $(if $(PROJECT),$(PROJECT)-tfstate,$(error PROJECT is unset: it names the state bucket, so pass PROJECT=<id> or keep terraform/registry/terraform.tfvars))
+BACKEND = -backend-config="bucket=$(STATE_BUCKET)"
 # And the service URL from the applied Cloud Run root, so smoke has one address to call.
 # The state lives in a GCS bucket now (#42), not in this checkout, so there is no local file to guard:
 # a machine that has the variables reaches the same state as this one. What replaced the guard is the
@@ -126,11 +134,11 @@ github: ## Create the repository, point origin at it, push, then protect the bra
 	@echo "== published: $$($(TERRAFORM_GITHUB) output -raw html_url)"
 
 github-plan: ## Show what the GitHub root creates, without creating it
-	$(TERRAFORM_GITHUB) init -input=false
+	$(TERRAFORM_GITHUB) init -input=false $(BACKEND)
 	$(TERRAFORM_GITHUB) plan -input=false
 
 github-create: ## Create the repository, so there is somewhere to push
-	$(TERRAFORM_GITHUB) init -input=false
+	$(TERRAFORM_GITHUB) init -input=false $(BACKEND)
 	$(TERRAFORM_GITHUB) apply -input=false -target=github_repository.repo
 
 github-remote: ## Point origin at the repository this root created
@@ -143,7 +151,7 @@ github-remote: ## Point origin at the repository this root created
 		|| git remote add origin "$$($(TERRAFORM_GITHUB) output -raw ssh_clone_url)"
 
 github-apply: ## Apply the rest, so branch protection lands once the branch exists
-	$(TERRAFORM_GITHUB) init -input=false
+	$(TERRAFORM_GITHUB) init -input=false $(BACKEND)
 	$(TERRAFORM_GITHUB) apply -input=false
 
 # Who can reach the repository is not in the Terraform root: the agent joins as a fork, so there is
@@ -187,11 +195,11 @@ github-status: ## Print the live repository settings, protection and access. An 
 	exit $$failed
 
 registry-plan: ## Show what the registry root creates, without creating it
-	$(TERRAFORM) init -input=false
+	$(TERRAFORM) init -input=false $(BACKEND)
 	$(TERRAFORM) plan -input=false
 
 registry-apply: ## Create the registry. Once, by the human, before the first push
-	$(TERRAFORM) init -input=false
+	$(TERRAFORM) init -input=false $(BACKEND)
 	$(TERRAFORM) apply -input=false
 
 login: ## Authorise docker for the registry host, as your own gcloud identity
@@ -245,10 +253,10 @@ deploy-plan: ## Show what the Cloud Run root would change, without changing it
 		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
 		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
 		exit 1; }
-	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \ \
+	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
-		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false; \
+		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false $(BACKEND); \
 		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) plan -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)"
 
 deploy: ## Deploy this commit's image, secret version and service to Cloud Run in one apply
@@ -281,7 +289,7 @@ deploy: ## Deploy this commit's image, secret version and service to Cloud Run i
 	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
-		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false; \
+		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false $(BACKEND); \
 		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) apply -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)"
 
 smoke: ## Assert the deployed probes and both auth directions (needs gcloud for a token)

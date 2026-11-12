@@ -90,7 +90,8 @@ the tags that do. A checkout whose commit was never pushed fails there, rather t
 Cloud Run update. If the registry cannot be asked — no `gcloud`, no login, no permission — it says
 that and shows gcloud's own error instead of claiming the image is missing.
 
-State lives in `gs://saxeum-b9b1f-tfstate/hyperchat/`, not in a checkout, so `make deploy` works from
+State lives in `gs://<project>-tfstate/hyperchat/`, not in a checkout — the bucket is passed to
+`terraform init` by the Makefile, so the project id stays out of the repository — so `make deploy` works from
 any machine with credentials and the variables, and two of them cannot apply at once. The bucket
 belongs to the sibling project's bootstrap root; this repository takes a prefix of it, and
 `docs/repository-as-code.md` records why that reversed #23 and what it costs. `make deploy-plan` shows

@@ -100,8 +100,11 @@ in a sequence someone remembers.
 
 ## The state is in a bucket, and the bucket is not ours
 
-All three roots keep their state in `gs://saxeum-b9b1f-tfstate/`, under a prefix each:
-`hyperchat/github`, `hyperchat/registry`, `hyperchat/app`. No checkout holds a state file any more,
+All three roots keep their state in `gs://<project>-tfstate/`, under a prefix each:
+`hyperchat/github`, `hyperchat/registry`, `hyperchat/app`. The bucket name is not in the backend
+blocks — the `Makefile` derives it from the project id and passes it as `-backend-config`, which is
+what keeps that identifier out of the repository, as this document says it must be. No checkout holds
+a state file any more,
 so a plan is the same plan on this laptop, on a second operator's machine, and on a runner — and two
 applies cannot interleave, because the bucket locks.
 

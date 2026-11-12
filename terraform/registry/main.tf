@@ -5,8 +5,9 @@ terraform {
   # This root is where `PROJECT` comes from, so it is reachable rather than being a file on one
   # laptop. `terraform init -backend=false` in CI still works; nothing here needs a credential to
   # validate.
+  # The bucket is passed by the Makefile as -backend-config, because a backend block cannot read a
+  # variable and writing it here would put the project id in the repository. The prefix is ours.
   backend "gcs" {
-    bucket = "saxeum-b9b1f-tfstate"
     prefix = "hyperchat/registry"
   }
 
