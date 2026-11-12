@@ -1,52 +1,40 @@
-# Deploying by hand, through the pipeline, until the two values have a home a runner can read.
+# Deploying on a merge, and by dispatch when a failed apply needs recovery.
 #
-# `workflow_dispatch` and nothing else, for now. That is a deliberate shape rather than a first
-# draft: this workflow never runs on its own, so it cannot turn a green `ci` run into a red deploy
-# run, and it stores no configuration anywhere. The three inputs are supplied at dispatch time —
-# `PROJECT` and `ALLOWED_SUBS` from `.env`, `WIF_PROVIDER` from `terraform output`. "Use `.env` for
-# now" is exact about that: the file is not in the tree, so the values are typed for the run and
-# nothing is kept afterwards but the run's own metadata.
+# Both entry points use the same production environment and identity. The environment holds the
+# deployed allowlist as a secret, which GitHub masks in step headers as well as log lines. `PROJECT`
+# and `WIF_PROVIDER` are repository variables: identifiers, not credentials; gcloud prints them
+# anyway, and the pull-request job needs them to attempt the authentication it must be refused.
 #
 # The identity is `terraform/registry/identity.tf` (#51), applied once in the one-time root. This
-# workflow is its only consumer and can never widen it: the provider refuses any repository but
-# `saxeum/hyperchat`, and any ref but `refs/heads/main`.
-#
-# When the values have a home a runner can reach — an `environment` holding them is the option on
-# #43 — this gains `workflow_run` on `ci` for `main`, the environment, and the pull-request job that
-# asserts a non-main ref cannot authenticate. None of those can work without stored configuration,
-# which is why they are not here yet.
+# workflow is its only consumer and can never widen it: the provider refuses any repository, ref,
+# workflow file or event other than the ones below.
 name: deploy
 
 on:
+  # After the CI workflow succeeds on main: a merge must not deploy a commit the tests have not seen.
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+  # The recovery path. A failed apply must not require an empty commit to retry.
   workflow_dispatch:
-    inputs:
-      project:
-        description: "GCP project id (terraform/registry/terraform.tfvars)"
-        required: true
-        type: string
-      allowed_subs:
-        description: "The DEPLOYED allowlist. Not the one in .env: that one includes the agent."
-        required: true
-        type: string
-      wif_provider:
-        description: "terraform -chdir=terraform/registry output -raw deployer_provider"
-        required: true
-        type: string
 
 # Nothing here writes the repository. The OIDC token is the only extra capability, and only the job
 # that needs it asks for it.
 permissions:
   contents: read
 
-# Two dispatches must not race. They would contend on the Terraform state lock, and the second would
-# either wait or fail; a queue is the honest behaviour for a deploy, and `cancel-in-progress: false`
-# because cancelling an apply half way is how the lock had to be cleared by hand.
+# Two deploys must not race. They would contend on the Terraform state lock, and cancelling an apply
+# half way is how the lock had to be cleared by hand.
 concurrency:
   group: deploy-hyperchat
   cancel-in-progress: false
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    # The production environment is where the allowlist lives and where a reviewer is required.
+    environment: production
     # The image build is the slow step; twenty minutes bounds a stalled registry pull rather than
     # letting the default six hours hold a runner.
     timeout-minutes: 20
@@ -55,41 +43,36 @@ jobs:
       contents: read
       id-token: write
     env:
-      # Identifiers, not credentials. Both are printed by gcloud and by the actions below whatever
-      # this file does, and the project id is in every resource path the plan touches.
-      PROJECT: ${{ inputs.project }}
-      WIF_PROVIDER: ${{ inputs.wif_provider }}
+      PROJECT: ${{ vars.PROJECT }}
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+      # The deployed allowlist. The environment secret is masked by GitHub in headers and logs; it is
+      # not the `.env` value, which includes the agent.
+      ALLOWED_SUBS: ${{ secrets.ALLOWED_SUBS }}
+      TF_VAR_allowed_subs: ${{ secrets.ALLOWED_SUBS }}
       # There is nobody here to answer `terraform apply`'s approval prompt, and a runner's stdin does
-      # not close: the dispatch before this one sat on that prompt holding the state lock until it was
-      # cancelled. The approval in this workflow is the human who dispatched it.
+      # not close: a dispatch sat on that prompt holding the state lock until it was cancelled. The
+      # approval is the environment reviewer, or the merge for an automatic run.
       AUTO_APPROVE: -auto-approve
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit the successful CI run tested; a manual dispatch has no workflow_run, so it
+          # checks out the dispatched ref's commit.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: require configuration
-        # Before anything authenticates: an empty input is a wrong invocation, not a failed deploy.
-        #
-        # The allowlist is masked before anything else uses it, because GitHub prints each step's
-        # environment in the log and this repository is public. Masking is the first command of the
-        # first step that holds the value, so at most this step's own header shows it — it cannot be
-        # removed from that header here, only from every line after it. The complete fix is an
-        # environment secret, which GitHub masks in the header too; that is #43's phase A, and this is
-        # the most that can be done while the value arrives as a dispatch input.
-        env:
-          ALLOWED_SUBS: ${{ inputs.allowed_subs }}
+        # Before anything authenticates: an empty value is a wrong environment/variable setup, not a
+        # failed deploy.
         run: |
           set -eu
-          echo "::add-mask::${ALLOWED_SUBS}"
-          : "${PROJECT:?input project is unset}"
-          : "${ALLOWED_SUBS:?input allowed_subs is unset}"
-          : "${WIF_PROVIDER:?input wif_provider is unset}"
+          : "${PROJECT:?repository variable PROJECT is unset}"
+          : "${WIF_PROVIDER:?repository variable WIF_PROVIDER is unset}"
+          : "${ALLOWED_SUBS:?environment secret ALLOWED_SUBS is unset}"
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           project_id: ${{ env.PROJECT }}
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
-          # Derived from the project id, which is also what the address of the account is: the
-          # account was created by terraform/registry/identity.tf with this name.
           service_account: hyperchat-deployer@${{ env.PROJECT }}.iam.gserviceaccount.com
 
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -102,7 +85,7 @@ jobs:
           terraform_version: "1.17.1"
 
       - name: which image is this commit's?
-        # Recorded either way, because `image-exists` makes the run trust a tag rather than a build:
+        # Recorded either way, because `image-digest` makes the run trust a tag rather than a build:
         # the digest in this log is the one the deploy will use, and the one to compare against what
         # Cloud Run reports afterwards.
         id: digest
@@ -133,11 +116,6 @@ jobs:
         # The provider key is write-only to Terraform, not absent from the apply. Read the existing
         # Secret Manager version into this process's environment; `make deploy` passes it as
         # TF_VAR_provider_api_key and Terraform stores it neither in state nor in the plan file.
-        env:
-          # The deployed allowlist, masked by the step above. It is an environment variable because
-          # `terraform/app` needs it as TF_VAR_allowed_subs, and this is the only step that does.
-          ALLOWED_SUBS: ${{ inputs.allowed_subs }}
-          TF_VAR_allowed_subs: ${{ inputs.allowed_subs }}
         run: |
           set -eu
           PROVIDER_API_KEY="$(gcloud secrets versions access latest \
@@ -162,11 +140,43 @@ jobs:
         # A half-applied state is the failure this repository has produced twice; the plan says what
         # was left behind, and a log without it turns a page into an investigation.
         if: failure()
-        env:
-          ALLOWED_SUBS: ${{ inputs.allowed_subs }}
-          TF_VAR_allowed_subs: ${{ inputs.allowed_subs }}
         run: |
           PROVIDER_API_KEY="$(gcloud secrets versions access latest \
             --secret=provider-api-key --project="$PROJECT")" || true
           export PROVIDER_API_KEY
           make deploy-plan || true
+
+  ref-not-main-cannot-auth:
+    # The provider's condition allows only refs/heads/main, workflow_dispatch/workflow_run and this
+    # workflow file. This job proves the pull-request direction is refused, and does not use the
+    # production environment or its allowlist.
+    if: github.event_name == 'pull_request' && vars.PROJECT != '' && vars.WIF_PROVIDER != ''
+    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT: ${{ vars.PROJECT }}
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+    steps:
+      - name: require identity configuration
+        run: |
+          set -eu
+          : "${PROJECT:?repository variable PROJECT is unset}"
+          : "${WIF_PROVIDER:?repository variable WIF_PROVIDER is unset}"
+
+      - name: attempt authentication from this ref
+        id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.PROJECT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: hyperchat-deployer@${{ env.PROJECT }}.iam.gserviceaccount.com
+
+      - name: the non-main ref must be refused
+        if: steps.auth.outcome == 'success'
+        run: |
+          echo "authentication succeeded on ${{ github.ref }}; the Workload Identity condition is not restricting the workflow, ref and event" >&2
+          exit 1

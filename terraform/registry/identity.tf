@@ -65,13 +65,13 @@ resource "google_iam_workload_identity_pool_provider" "github_hyperchat" {
   #
   #   * `workflow_ref` names the workflow file at a ref, so a new workflow on `main` does not inherit
   #     this identity by existing;
-  #   * `event_name` is `workflow_dispatch` today. When #43's phase A adds `workflow_run`, this line
-  #     changes with it — a deliberate edit, not a new capability that arrived by itself.
+  #   * `event_name` allows the two ways this workflow runs: automatic after CI on `main`, and the
+  #     manual dispatch that recovers a failed apply. The pull-request event stays absent.
   attribute_condition = join(" && ", [
     "assertion.repository == \"saxeum/hyperchat\"",
     "assertion.ref == \"refs/heads/main\"",
     "assertion.workflow_ref == \"saxeum/hyperchat/.github/workflows/deploy.yml@refs/heads/main\"",
-    "assertion.event_name == \"workflow_dispatch\"",
+    "assertion.event_name in [\"workflow_dispatch\", \"workflow_run\"]",
   ])
 }
 
