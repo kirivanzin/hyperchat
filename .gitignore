@@ -29,8 +29,13 @@ terraform.tfvars
 *.pem
 *.key
 
-# The agent's own account details, from `gh api /user`: login, numeric id, and the public half of its
-# SSH key. Not a credential, and still not something a public repository should carry.
+# Anything kept locally that is not for publication: the agent's account details, notes about this
+# machine, tricks that only make sense here. Never committed, and never needed to build the project --
+# if the repository stops working without something, that something belongs in the repository.
+.secret/
+
+# Belt as well as braces: the identity file must never be public even if it is moved out of .secret/,
+# and it once sat in the repository root untracked and one `git add -A` from being published.
 .agent.identity
 
 .DS_Store

@@ -224,16 +224,27 @@ still prints `1`. An outside collaborator on a public repository does not consum
 ever reads `2`, the account was added as an organisation member instead and the invitation should be
 withdrawn.
 
-## The account file
+## What stays local: `.secret/`
 
-The account's own details are kept in `.agent.identity`, ignored by `.gitignore`: the login, the
-numeric id, and the public half of the SSH key, straight from `gh api /user`. It is **not** a
-credential — there is no token in it — and it is still not something a public repository should
-carry, because it names an identity and says where its key lives.
+Everything about this machine that is not for publication lives in `.secret/`, which both
+`.gitignore` and `.dockerignore` name. Two files today: `agent.identity`, and a README describing the
+convention.
 
-If a file like this ever turns up as untracked despite being listed, check `core.excludesfile`
-before doubting the `.gitignore`. On the machine this was set up on it pointed at a macOS path that
-does not exist, so the global ignore file had never applied to anything at all.
+`agent.identity` holds the agent account's own details from `gh api /user` — login, numeric id, and
+the public half of the SSH key. It is **not** a credential; there is no token in it.
+
+**Credentials do not go in there.** They live outside every checkout, in `~/.config/hyperchat/` and
+`~/.ssh/`. A checkout gets copied, cleaned, archived and indexed by tools that were never asked to
+keep a secret, `git clean -xdf` removes ignored files, and a `tar` of the directory carries whatever
+is in it. A directory called `.secret` is a drawer that is not locked: right for an identity, wrong
+for a key.
+
+**Neither does anything the project needs.** If the repository cannot be built or run without a
+file, that file belongs in the repository or in `docs/`.
+
+If a file in there ever turns up as *untracked*, check `core.excludesfile` before doubting
+`.gitignore`: on the machine this was set up on it pointed at a macOS path that has never existed, so
+the global ignore file had applied to nothing at all.
 
 ## What this costs
 
