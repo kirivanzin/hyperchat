@@ -33,6 +33,11 @@ jobs:
           # to the file is a visible change to CI rather than a silent one.
           python-version: "3.13"
 
+      - name: lint
+        # First because it is the cheapest and it needs nothing: no network, no credentials, no
+        # provider download. A formatting failure should not wait behind `terraform init`.
+        run: make lint
+
       - name: tests
         run: uv run pytest -q
 
@@ -49,3 +54,12 @@ jobs:
         run: |
           terraform -chdir=terraform/github init -backend=false -input=false
           terraform -chdir=terraform/github validate
+
+      - name: build the image
+        # Builds and discards it. There is no registry credential in this job and none is wanted: the
+        # pull request computes, the merged commit is what could ever publish.
+        #
+        # It is here because "does the Dockerfile still build" was, for three pull requests in a row,
+        # the one claim that rested on the owner's laptop. `make build` rather than a duplicate
+        # `docker build` line, so CI and a human run the same command.
+        run: make build
