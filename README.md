@@ -19,6 +19,24 @@ review on every pull request.
 `make lint` and `make test` need no credentials. The merge path is `.github/workflows/deploy.yml`,
 whose header and `terraform/registry/identity.tf` are its documentation.
 
+## The public tax
+
+Twelve PRs here exist only because the repository is public:
+
+| | |
+|---|---|
+| `#3`, `#5`, `#6`, `#8` | agent identity, ignored local material, and fork-based contribution |
+| `#10`, `#11` | the pinned build chain, and the redteam findings |
+| `#33` | the provider key outside the checkout |
+| `#48`, `#51`, `#54`, `#55` | project APIs, deployer identity, workflow/event binding, and the production environment |
+| `#49` | Dependabot's interpreter ignore |
+
+A private build would commit `terraform.tfvars` and state, give CI a service-account key, grant
+`roles/editor`, let the bot push, and force-push the history once. This repository pays roughly
+35–40% of the day instead, and buys properties a reviewer can check: no identifier in the tree, a
+Workload Identity condition a stranger can read and test, a fork that proves the negative direction,
+and a history that does not need rewriting.
+
 ## Layout
 
 | Path | What it is |

@@ -78,8 +78,12 @@ resource "github_branch_protection" "default" {
   #
   # - no required_pull_request_reviews: one account cannot approve its own pull request, and a
   #   required approval that nobody can give blocks every merge.
-  # - no required_status_checks: there is no CI in this repository, and a required check that never
-  #   reports blocks every merge in the same way.
+  # - no required_status_checks yet: `.github/workflows/ci.yml` runs on every pull request and has a
+  #   history of green and red on real ones, so the "watch it first" half of the argument in
+  #   docs/repository-as-code.md is done and the half that is left is adding the context it reports
+  #   under. A required check that has never reported blocks every merge in the same way as an
+  #   approval nobody can give, which is why it is added from the check name the API reports rather
+  #   than from the workflow's `name:` here (#58).
   #
   # `enforce_admins = true` is what makes the other two real rather than advisory for the only
   # account that exists.
