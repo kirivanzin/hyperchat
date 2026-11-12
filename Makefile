@@ -262,6 +262,15 @@ deploy: ## Deploy this commit's image, secret version and service to Cloud Run i
 		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
 		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
 		exit 1; }
+	@if ! gcloud artifacts docker images describe "$(REMOTE)" --project=$(PROJECT) \
+			--format='value(image_summary.digest)' >/dev/null 2>&1; then \
+		echo "no image $(REMOTE) exists." >&2; \
+		echo "Either it was never pushed, or this checkout is not the commit you think:" >&2; \
+		echo "TAG comes from git rev-parse --short HEAD ($(TAG)); the registry has:" >&2; \
+		gcloud artifacts docker tags list "$(REGISTRY)/$(IMAGE)" --project=$(PROJECT) \
+			--format='value(tag)' 2>/dev/null | sed 's/^/  /' >&2 || true; \
+		exit 1; \
+	fi
 	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
