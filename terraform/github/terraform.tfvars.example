@@ -1,2 +1,6 @@
 # Copy to terraform.tfvars, which is git-ignored.
 owner = "your-github-account"
+
+# Set once the agent's account exists. Until then the collaborator resource has a count of zero and
+# nothing is invited. docs/agent-identity.md is the runbook for creating the account.
+# agent_username = "the-agent-login"
