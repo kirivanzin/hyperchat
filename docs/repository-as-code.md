@@ -94,9 +94,9 @@ make github-apply
 applies the protection, now that there is a `main` to protect.
 
 Applying the whole root first would create the repository, fail on the protection with a 404, and
-leave half a plan applied — which is the same shape as the secret-before-revision problem, and the
-same answer: order the steps in the `Makefile` where they can be read, rather than in a sequence
-someone remembers.
+leave half a plan applied — which is the same shape as any bootstrap that assumes its next step
+succeeded, and the same answer: order the steps in the `Makefile` where they can be read, rather than
+in a sequence someone remembers.
 
 ## The state is local, and that is the decision
 
