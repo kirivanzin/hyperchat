@@ -38,5 +38,10 @@ terraform.tfvars
 # and it once sat in the repository root untracked and one `git add -A` from being published.
 .agent.identity
 
+# Instructions for whoever is working in a checkout, which are not the project's instructions.
+# Named here as well as in .git/info/exclude: the local file does not travel, so a fresh clone or a
+# colleague's checkout would otherwise have no protection at all.
+AGENTS.md
+
 .DS_Store
 .zed/
