@@ -40,8 +40,7 @@ terraform.tfvars
 .agent.identity
 
 # Instructions for whoever is working in a checkout, which are not the project's instructions.
-# Named here as well as in .git/info/exclude: the local file does not travel, so a fresh clone or a
-# colleague's checkout would otherwise have no protection at all.
+# Named here so no clone can commit one: the file is local, and `.gitignore` is the part that travels.
 AGENTS.md
 
 .DS_Store
