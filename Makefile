@@ -30,7 +30,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help info lint test build run stop github github-plan github-create github-remote \
+.PHONY: help info lint test dev build run stop github github-plan github-create github-remote \
         github-apply github-status registry-plan registry-apply login push registry-status
 
 help: ## Show this help
@@ -51,6 +51,9 @@ test: ## Run the tests
 
 build: ## Build the image for this commit, pulling the base image
 	docker build --pull -t $(LOCAL) .
+
+dev: ## Run the app from the source tree on PORT, no image (authorise with: .env, #15)
+	uv run uvicorn hyperchat.main:api --host 127.0.0.1 --port $(PORT)
 
 run: ## Run the image on PORT, in the foreground
 	docker run --rm --name $(IMAGE) -p $(PORT):8080 $(LOCAL)
