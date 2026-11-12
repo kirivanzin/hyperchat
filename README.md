@@ -98,47 +98,38 @@ writes them. `docs/repository-as-code.md` records that split and what it costs. 
 shows the change, and `make registry-verify` shows the image the service is running beside the
 registry digest for the current tag.
 
-## Deploying through the pipeline, by hand
+## Deploying on a merge
 
-`.github/workflows/deploy.yml` is **dispatch-only**, and that is the current shape rather than a
-first draft. A runner has no `.env` — it is git-ignored and not in the tree — and this repository
-keeps the project id and the deployed allowlist out of stored configuration, so the three values are
-typed at dispatch time and nothing is kept but the run's own metadata:
+`.github/workflows/deploy.yml` runs after the `ci` workflow succeeds on `main`, and can also be
+dispatched by hand as the recovery path when an apply fails — a failed apply does not need an empty
+commit. Both paths use the `production` environment, so the job can require a reviewer.
+
+It needs two repository variables and one environment secret:
+
+- `PROJECT` and `WIF_PROVIDER` are identifiers, not credentials. The pull-request job needs them to
+  attempt the authentication it must be refused; gcloud prints them anyway.
+- `ALLOWED_SUBS` is the deployed allowlist, stored as a `production` environment secret so GitHub
+  masks it in step headers as well as log lines. It is not `.env`'s list: that one includes the agent.
 
 ```sh
-gh workflow run deploy.yml \
-  -f project=<project> \
-  -f allowed_subs=<the deployed allowlist, not the one in .env> \
-  -f wif_provider="$(terraform -chdir=terraform/registry output -raw deployer_provider)"
+gh workflow run deploy.yml      # recovery, on the current main commit
 ```
 
-`<project>` is the id in `terraform/registry/terraform.tfvars`; `<project>-tfstate` is the state
-bucket. The allowlist is the deployed one: `.env`'s includes the agent so it can test, and that
-subject must not be deployed.
-
-The job authenticates as `hyperchat-deployer` through Workload Identity. The provider refuses anything
-but this repository, this ref, this workflow file and this event — `workflow_ref` is what stops a new
-workflow on `main` from inheriting the identity, `pull_request_target` included — and, when this
-commit's image is not already in the registry, builds and pushes it (`make image-exists` decides; a
-tag that exists is a commit whose image exists, and the registry's immutability means it must never be
-pushed twice),
-runs `make deploy` with the provider key read from Secret Manager into that step's environment, then
-asserts `/livez` is `200` and `/api/me` without a token is `401`. `make smoke` stays a human step
-because it mints a token from a user login, which this identity cannot do.
-
-The allowlist arrives as a dispatch input, which means GitHub prints it once in the header of the
-step that receives it, before `::add-mask::` covers every line after. GitHub prints each step's
-environment and this repository is public, so the fix is an environment secret; that is #43's phase A,
-and this is the most that can be done while the value arrives as an input. Two dispatches cannot run
-at once — `concurrency` is `deploy-hyperchat`, not cancelling — because they would contend on the
-Terraform state lock, and the digest of the image each run deploys is in its log either way.
+The job authenticates as `hyperchat-deployer` through Workload Identity. The provider refuses any
+repository, ref, workflow file or event other than this one and its two entry points, so a new
+workflow on `main` cannot inherit the identity. It builds and pushes this commit's image when the tag
+is not already present, runs `make deploy` with the provider key read from Secret Manager into that
+step's environment, then asserts `/livez` is `200` and `/api/me` without a token is `401`. `make
+smoke` stays a human step because it mints a token from a user login, which this identity cannot do.
 
 The identity itself is `terraform/registry/identity.tf`, applied once with `make registry-apply`. The
-workflow can never create or widen it.
+workflow can never create or widen it. The event condition allows `workflow_dispatch` and
+`workflow_run`; that Terraform line is written here and must be applied before a merge-triggered
+deploy can authenticate.
 
-When the values have a home a runner can read — an `environment` is the option on #43 — the workflow
-gains `workflow_run` on `ci` for `main`, and the pull-request job that asserts a non-main ref cannot
-authenticate. Neither can be written honestly before that, so neither is here.
+The pull-request job attempts the same authentication and fails if it succeeds, because the provider
+condition requires `refs/heads/main` and one of the two deploy events. It uses the repository
+variables, not the production environment.
 
 ## Calling it as a human
 
