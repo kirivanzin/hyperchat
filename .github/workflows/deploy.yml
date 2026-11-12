@@ -1,0 +1,115 @@
+# A merge to main builds that commit's image and deploys it. The identity this uses is the
+# owner-authorised OIDC deployer from #43; this workflow never creates or broadens it.
+#
+# The pull-request job is the failing direction: the same authentication attempt is expected to be
+# refused on any ref but refs/heads/main, because the Workload Identity provider's attribute
+# condition checks both the repository and the ref. If it ever succeeds there, the job fails.
+name: deploy
+
+on:
+  # After the CI workflow succeeds on main: a merge must not deploy a commit the tests have not
+  # seen. `ci` is not a required check yet, so this is the dependency that makes it one here.
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+    branches: [main]
+  # The failing direction, exercised on every pull request once PROJECT exists.
+  pull_request:
+
+# Nothing here writes the repository. The deploy job also needs an OIDC token; the negative job
+# needs one to prove it cannot be exchanged.
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    # The image build is the slow step. Twenty minutes bounds a stalled registry pull rather than
+    # letting the default six hours hold a runner.
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT: ${{ vars.PROJECT }}
+      ALLOWED_SUBS: ${{ vars.ALLOWED_SUBS }}
+      # The runbook in #43 creates these two names. The service account is derived from the project;
+      # the provider path is the resource the runbook creates in the github pool.
+      DEPLOYER_SA: hyperchat-deployer@${{ vars.PROJECT }}.iam.gserviceaccount.com
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER || format('projects/{0}/locations/global/workloadIdentityPools/github/providers/github-hyperchat', vars.PROJECT) }}
+      TF_VAR_allowed_subs: ${{ vars.ALLOWED_SUBS }}
+    steps:
+      - name: require deploy configuration
+        run: |
+          set -eu
+          : "${PROJECT:?repository variable PROJECT is unset}"
+          : "${ALLOWED_SUBS:?repository variable ALLOWED_SUBS is unset}"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit the successful CI run tested, not whatever main points at when this starts.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.PROJECT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: ">= 363.0.0"
+          project_id: ${{ env.PROJECT }}
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+
+      - name: authenticate Docker
+        run: make login
+
+      - name: build the image
+        run: make build
+
+      - name: push the image
+        run: make push
+
+      - name: deploy
+        # The provider key is write-only to Terraform, not absent from the apply. Read the existing
+        # Secret Manager version into the process environment; `make deploy` passes it as
+        # TF_VAR_provider_api_key and Terraform does not store it in state or the plan.
+        run: |
+          set -eu
+          PROVIDER_API_KEY="$(gcloud secrets versions access latest --secret=provider-api-key --project="$PROJECT")"
+          export PROVIDER_API_KEY
+          make deploy
+
+  ref-not-main-cannot-auth:
+    # Before the repository variables exist there is no identity to test; skip rather than fail every
+    # pull request. Once PROJECT is set, the attempt must be refused.
+    if: github.event_name == 'pull_request' && vars.PROJECT != ''
+    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT: ${{ vars.PROJECT }}
+      DEPLOYER_SA: hyperchat-deployer@${{ vars.PROJECT }}.iam.gserviceaccount.com
+      WIF_PROVIDER: ${{ vars.WIF_PROVIDER || format('projects/{0}/locations/global/workloadIdentityPools/github/providers/github-hyperchat', vars.PROJECT) }}
+    steps:
+      - name: attempt authentication from this ref
+        id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.PROJECT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - name: the non-main ref must be refused
+        if: steps.auth.outcome == 'success'
+        run: |
+          echo "authentication succeeded on ${{ github.ref }}; the Workload Identity condition is not restricting refs/heads/main" >&2
+          exit 1

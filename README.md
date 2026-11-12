@@ -98,6 +98,22 @@ writes them. `docs/repository-as-code.md` records that split and what it costs. 
 shows the change, and `make registry-verify` shows the image the service is running beside the
 registry digest for the current tag.
 
+## Deploying on a merge
+
+`.github/workflows/deploy.yml` runs after the `ci` workflow succeeds on `main`: it authenticates
+through the OIDC deployer created for #43, builds and pushes the image for the tested commit, then
+runs `make deploy`. It requires two repository variables, `PROJECT` and `ALLOWED_SUBS`; the provider
+key is read from Secret Manager into the apply's environment and never written to state.
+`WIF_PROVIDER` is optional when the provider path needs the project number rather than the project
+id. The deployer identity and its five grants are the out-of-band runbook in #43; this workflow does
+not create or broaden them. `make smoke` stays a human step because it needs a token minted by a
+user, not by the deployer.
+
+The same workflow has a pull-request job that attempts the same authentication and expects the
+Workload Identity provider to refuse it, because its condition requires both
+`assertion.repository == "saxeum/hyperchat"` and `assertion.ref == "refs/heads/main"`. If that job ever
+succeeds, it fails instead of treating the provider condition as documentation.
+
 ## Calling it as a human
 
 `/api/me` is protected and `/` is not. A token is a Google ID token whose audience is the `gcloud` SDK
