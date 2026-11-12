@@ -27,15 +27,17 @@ on:
 permissions:
   contents: read
 
-# Two deploys must not race. They would contend on the Terraform state lock, and cancelling an apply
-# half way is how the lock had to be cleared by hand.
-concurrency:
-  group: deploy-hyperchat
-  cancel-in-progress: false
 
 jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    # Two deploys must not race: they would contend on the Terraform state lock, and cancelling an
+    # apply half way is how the lock had to be cleared by hand. This is on the job, not on the
+    # workflow, because the negative job below runs on every pull request — a workflow-level group
+    # would queue pull-request checks behind deploys and never cancel them.
+    concurrency:
+      group: deploy-hyperchat
+      cancel-in-progress: false
     # The production environment is where the allowlist lives and where a reviewer is required.
     environment: production
     # The image build is the slow step; twenty minutes bounds a stalled registry pull rather than
