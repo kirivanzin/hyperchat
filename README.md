@@ -103,8 +103,9 @@ that "silently new" becomes "silently old": the base stops taking Debian and CPy
 digest moves. Dependabot is what moves it — weekly, grouped, and ignoring interpreter minor versions
 because those move four pins at once.
 
-**CI reports, and is not required.** A required check that has never been seen to fail can block
-every merge without saying why, so it is watched green and red first and required afterwards. Every
+**CI is a required check on `main`.** A required check that has never been seen to fail can block
+every merge without saying why, so it reported green and red on real pull requests for a day before
+`terraform/github` named it. The context is the job name the API reports, not the workflow's. Every
 action is pinned by commit SHA and the job runs with `contents: read`.
 
 **The contributor is an untrusted principal.** A real account, but not a collaborator: it joins by

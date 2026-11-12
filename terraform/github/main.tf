@@ -74,19 +74,21 @@ resource "github_branch_protection" "default" {
   allows_force_pushes = false
   allows_deletions    = false
 
-  # Nothing else, and each absence is a decision taken elsewhere and recorded here:
+  # One required check, and it is `ci`: the name the API reports for the job, not the workflow's
+  # `name:` and not the job's `id`.
   #
-  # - no required_pull_request_reviews: one account cannot approve its own pull request, and a
-  #   required approval that nobody can give blocks every merge.
-  # - no required_status_checks yet: `.github/workflows/ci.yml` runs on every pull request and has a
-  #   history of green and red on real ones, so the "watch it first" half of the argument in
-  #   docs/repository-as-code.md is done and the half that is left is adding the context it reports
-  #   under. A required check that has never reported blocks every merge in the same way as an
-  #   approval nobody can give, which is why it is added from the check name the API reports rather
-  #   than from the workflow's `name:` here (#58).
-  #
-  # `enforce_admins = true` is what makes the other two real rather than advisory for the only
-  # account that exists.
+  # `ref-not-main-cannot-auth` is deliberately *not* required. It is skipped on a fork pull request,
+  # and a check that is skipped never reports success, so requiring it would block every contribution
+  # from the fork — the opposite of what it is there to protect. The gate that protects `main` is the
+  # one that runs everywhere.
+  required_status_checks {
+    strict   = false
+    contexts = ["ci"]
+  }
+
+  # No required_pull_request_reviews: one account cannot approve its own pull request, and a required
+  # approval that nobody can give blocks every merge. `enforce_admins = true` is what makes the rest
+  # real rather than advisory for the only account that exists.
 }
 
 output "full_name" {

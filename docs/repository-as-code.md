@@ -11,14 +11,17 @@ cost or it is not; this records which cost.
   mechanism that makes "no secret has been near this" a property rather than an intention
 - Dependabot security updates, in Terraform so the switch is configuration rather than whoever
   remembers clicking it; `.github/dependabot.yml` is what makes the pins movable at all
-- branch protection on `main`: `enforce_admins`, no force-push, no deletion, and deliberately **no**
-  required reviewers and **no** required checks
+- branch protection on `main`: `enforce_admins`, no force-push, no deletion, one required check
+  (`ci`), and deliberately **no** required reviewers
 
-Two absences are choices. One account cannot approve its own pull request, so a required approval
-blocks every merge. And `ci.yml` reports on every pull request but is deliberately not required: a
-check that has never been seen to fail can block every merge without saying why, so it is watched
-green and red first and required afterwards. Required reviewers become correct the day there is a
-second identity; a required check becomes correct the day it has a history.
+The required check is the one that only arrived after it had a history: `ci.yml` reported on every
+pull request for a day, green and red on real ones, before `terraform/github` named it. A check that
+has never been seen to fail can block every merge without saying why, so it is watched first and
+required afterwards.
+
+The absence that remains is required reviewers. One account cannot approve its own pull request, so a
+required approval that nobody can give would block every merge; that becomes correct the day there is
+a second identity.
 
 ## The tradeoff
 
