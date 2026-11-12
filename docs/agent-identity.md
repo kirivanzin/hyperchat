@@ -224,16 +224,16 @@ still prints `1`. An outside collaborator on a public repository does not consum
 ever reads `2`, the account was added as an organisation member instead and the invitation should be
 withdrawn.
 
-## Two files, and one of them is not a credential
+## The account file
 
-The account's own details are kept in `.agent.idenity` — the username, the numeric id, and the
-public half of the SSH key, straight from `gh api /user`. It is **not** a credential and it is still
-git-ignored: it names an identity, and this repository is public.
+The account's own details are kept in `.agent.identity`, ignored by `.gitignore`: the login, the
+numeric id, and the public half of the SSH key, straight from `gh api /user`. It is **not** a
+credential — there is no token in it — and it is still not something a public repository should
+carry, because it names an identity and says where its key lives.
 
-The spelling is wrong, and `.gitignore` carries both spellings so that fixing the name later does
-not quietly start publishing it. If a file like this ever turns up as untracked anyway, check
-`core.excludesfile` before doubting the `.gitignore`: on this machine it pointed at a macOS path that
-does not exist, so the global ignore file had never applied to anything.
+If a file like this ever turns up as untracked despite being listed, check `core.excludesfile`
+before doubting the `.gitignore`. On the machine this was set up on it pointed at a macOS path that
+does not exist, so the global ignore file had never applied to anything at all.
 
 ## What this costs
 

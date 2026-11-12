@@ -29,12 +29,9 @@ terraform.tfvars
 *.pem
 *.key
 
+# The agent's own account details, from `gh api /user`: login, numeric id, and the public half of its
+# SSH key. Not a credential, and still not something a public repository should carry.
+.agent.identity
+
 .DS_Store
 .zed/
-
-# The agent's own account details, as returned by `gh api /user`, plus its public key. Not a
-# credential, but it is a file about an identity that has no business in a public repository --
-# and the filename below is misspelled because that is the name on disk. Both spellings are here so
-# renaming it later does not quietly start publishing it.
-.agent.idenity
-.agent.identity
