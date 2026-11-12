@@ -10,6 +10,9 @@ of guessing at one.
   the history of the repository
 - secret scanning and secret scanning push protection, both free on a public repository and both
   the mechanism that makes "no secret has been near this" a property rather than an intention
+- Dependabot security updates, in Terraform so the switch is configuration rather than whoever
+  remembers clicking it; `.github/dependabot.yml` is what makes the pins movable at all — `uv` and
+  `docker`, weekly, grouped one pull request per ecosystem (#2)
 - branch protection on `main`: `enforce_admins`, no force-push, no deletion, and deliberately
   **no** required reviewers and **no** required checks
 
