@@ -12,7 +12,7 @@ service, in a way that is still true when there are fifty of them.
 | `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, no cache reused across builds. |
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
-| `terraform/registry` | The Artifact Registry repository. Applied once. |
+| `terraform/registry` | The Artifact Registry repository and the three project APIs the service needs. Applied once, by hand, before the first push. |
 | `terraform/app` | The Cloud Run service, its runtime identity, the provider secret and version, and the two project APIs it needs. Applied after an image exists. |
 | `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
 | `scripts/token.sh` | `make token`: a Google ID token for the configured audience, from your own `gcloud` login. |

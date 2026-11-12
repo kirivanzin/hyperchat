@@ -31,7 +31,40 @@ variable "repository" {
   default     = "hyperchat"
 }
 
+# The project-level facts this repository needs, in the root that is applied once, by hand, before
+# anything is pushed or deployed. They are here rather than in terraform/app so that the root a merge
+# applies touches nothing outside its own service — and so the deployer a workflow uses needs no grant
+# on project APIs at all (#43).
+#
+# `disable_on_destroy = false`: losing them from state leaves the APIs on rather than disabling a
+# project, which is the failure this setting exists to prevent.
+#
+# They are enabled in this project already, by the sibling repository's bootstrap root. That is two
+# owners of one fact, and it is deliberate for now: a new project needs an owner inside this
+# repository, and the alternative is that `make registry-apply` cannot provision one.
+resource "google_project_service" "run" {
+  project            = var.project
+  service            = "run.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "secretmanager" {
+  project            = var.project
+  service            = "secretmanager.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Needed by the resource below, and by nothing else here: a repository cannot be created in a project
+# that has not enabled Artifact Registry.
+resource "google_project_service" "artifactregistry" {
+  project            = var.project
+  service            = "artifactregistry.googleapis.com"
+  disable_on_destroy = false
+}
+
 resource "google_artifact_registry_repository" "images" {
+  depends_on = [google_project_service.artifactregistry]
+
   location      = var.region
   repository_id = var.repository
   format        = "DOCKER"
