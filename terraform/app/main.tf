@@ -120,6 +120,22 @@ variable "provider_key_version" {
   }
 }
 
+# Project-level facts with `disable_on_destroy = false`: losing them from state leaves the APIs on
+# rather than disabling a project. They live in this root, not a bootstrap one, because a bootstrap
+# here would exist to hold a state bucket and this repository keeps local state; `depends_on` is what
+# orders enablement before the resources that need it, and ordering is not a reason for a root.
+resource "google_project_service" "secretmanager" {
+  project            = var.project
+  service            = "secretmanager.googleapis.com"
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "run" {
+  project            = var.project
+  service            = "run.googleapis.com"
+  disable_on_destroy = false
+}
+
 # A service account of its own, not the default compute account: that account has project-wide editor
 # rights, and a runtime identity with those is a blast radius rather than a deployment detail.
 resource "google_service_account" "runtime" {
@@ -138,6 +154,8 @@ resource "google_secret_manager_secret" "provider_key" {
   replication {
     auto {}
   }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 resource "google_secret_manager_secret_version" "provider_key" {
@@ -253,7 +271,10 @@ resource "google_cloud_run_v2_service" "service" {
     }
   }
 
-  depends_on = [google_secret_manager_secret_iam_member.runtime_accessor]
+  depends_on = [
+    google_project_service.run,
+    google_secret_manager_secret_iam_member.runtime_accessor,
+  ]
 }
 
 # Public invoker, matching the rest of the project, with the app as the gate. The allowlist is what

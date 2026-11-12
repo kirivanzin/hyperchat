@@ -1,5 +1,5 @@
 # Every operation this repository supports, in the order it happens:
-#   github -> registry -> bootstrap -> login -> build -> push -> deploy.  `make help` lists them.
+#   github -> registry -> login -> build -> push -> deploy.  `make help` lists them.
 #
 # The image tag is the commit, not "dev", and the registry refuses to overwrite a tag
 # (docker_config.immutable_tags in terraform/registry). Two things follow, both intended: pushing the
@@ -15,7 +15,6 @@ PORT       ?= 8080
 
 TERRAFORM = terraform -chdir=terraform/registry
 TERRAFORM_GITHUB = terraform -chdir=terraform/github
-TERRAFORM_BOOTSTRAP = terraform -chdir=terraform/bootstrap
 TERRAFORM_APP = terraform -chdir=terraform/app
 BRANCH ?= main
 # The project is read from the applied registry root rather than repeated here. Two places holding
@@ -37,7 +36,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 .DEFAULT_GOAL := help
 
 .PHONY: help info lint test build dev run stop token chat github github-plan github-create github-remote \
-        github-apply github-status registry-plan registry-apply bootstrap-plan bootstrap-apply login push \
+        github-apply github-status registry-plan registry-apply login push \
         registry-status registry-verify deploy-plan deploy smoke
 
 help: ## Show this help
@@ -192,22 +191,6 @@ registry-plan: ## Show what the registry root creates, without creating it
 registry-apply: ## Create the registry. Once, by the human, before the first push
 	$(TERRAFORM) init -input=false
 	$(TERRAFORM) apply -input=false
-
-bootstrap-plan: ## Show what project API enablement would change, without changing it
-	@[ -n "$(PROJECT)" ] || { \
-		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
-		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
-		exit 1; }
-	$(TERRAFORM_BOOTSTRAP) init -input=false
-	$(TERRAFORM_BOOTSTRAP) plan -input=false -var="project=$(PROJECT)"
-
-bootstrap-apply: ## Enable the project APIs this service needs. Once per project
-	@[ -n "$(PROJECT)" ] || { \
-		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
-		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
-		exit 1; }
-	$(TERRAFORM_BOOTSTRAP) init -input=false
-	$(TERRAFORM_BOOTSTRAP) apply -input=false -var="project=$(PROJECT)"
 
 login: ## Authorise docker for the registry host, as your own gcloud identity
 	@gcloud auth configure-docker $(REGION)-docker.pkg.dev --quiet

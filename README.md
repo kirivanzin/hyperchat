@@ -13,8 +13,7 @@ service, in a way that is still true when there are fifty of them.
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | The Artifact Registry repository. Applied once. |
-| `terraform/bootstrap` | The two project APIs the service needs. Applied once per project. |
-| `terraform/app` | The Cloud Run service, its runtime identity, and the provider secret and version. Applied after an image exists. |
+| `terraform/app` | The Cloud Run service, its runtime identity, the provider secret and version, and the two project APIs it needs. Applied after an image exists. |
 | `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
 | `scripts/token.sh` | `make token`: a Google ID token for the configured audience, from your own `gcloud` login. |
 | `scripts/smoke.sh` | `make smoke`: the deployed probes, and `/api/me` both without and with a token. |
@@ -58,7 +57,7 @@ push into the wrong project succeeds.
 
 The project id is not in this repository. `terraform/registry/terraform.tfvars` holds it and is
 git-ignored; the Makefile reads it back out of the applied state, so there is one copy of it rather
-than two that can disagree. `terraform/bootstrap` and `terraform/app` receive it from that state too rather than repeating it.
+than two that can disagree. `terraform/app` receives it from that state too rather than repeating it.
 
 ## Deploying it to Cloud Run
 
@@ -72,13 +71,11 @@ The deployed `ALLOWED_SUBS` must not be copied from `.env`: the local list inclu
 subject so it can test, and the deployed list must not contain it. `expected_audience` defaults to the
 gcloud user-token client id, because it is a constant rather than a per-deployment choice.
 
-The two project APIs are enabled once, in their own root, so the service root only touches its own
-resources:
+The two project APIs are enabled by the same root that uses them, in dependency order rather than in
+a separate bootstrap step:
 
 ```sh
-make bootstrap-plan        # the APIs that would be enabled
-make bootstrap-apply       # Secret Manager and Cloud Run, once per project
-make deploy                # secret -> version -> grant -> service, in one apply
+make deploy                # APIs -> secret -> version -> grant -> service, in one apply
 make smoke                 # /, /livez, /readyz, and /api/me without and with a token
 ```
 

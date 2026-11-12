@@ -100,12 +100,12 @@ in a sequence someone remembers.
 
 ## The state is local, and that is the decision
 
-All four Terraform roots use local state: `terraform/github/terraform.tfstate`,
-`terraform/registry/terraform.tfstate`, `terraform/bootstrap/terraform.tfstate` and
-`terraform/app/terraform.tfstate`. Each is git-ignored by `*.tfstate`, exists only in the checkout
-that applied it, and has no locking and no spare copy. It is the only copy.
+All three Terraform roots use local state: `terraform/github/terraform.tfstate`,
+`terraform/registry/terraform.tfstate` and `terraform/app/terraform.tfstate`. Each is git-ignored by
+`*.tfstate`, exists only in the checkout that applied it, and has no locking and no spare copy. It
+is the only copy.
 
-Remote state is a bucket, and a bucket is another bootstrap: a fifth root applied by hand. That is
+Remote state is a bucket, and a bucket is another bootstrap: a fourth root applied by hand. That is
 real work paid now to solve a problem nobody has yet — one operator, one laptop, and a destroy that
 can only come from the checkout holding the state — so the decision is to keep local state and write
 the consequence down.
