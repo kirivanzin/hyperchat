@@ -144,10 +144,12 @@ empty reply is a 502 as well, and the log carries `finish_reason`.
 
 ## Not here yet
 
-Rate limits, streaming, the run bounds, and tracing. The next phase is the agent itself: tools, a
-second model, and the security testing that goes with them. `make eval` is the first attempt at the
-other question — not what happened, but whether it was right — and its case set is twenty lines in
-`evals/cases.jsonl` with a `why` on each.
+Streaming and tracing — what happened, rather than whether it was allowed to happen. The run bounds
+are here: a step ceiling, a time budget, a provider timeout and a per-caller rate, each with its own
+answer (`src/hyperchat/README.md`, and `make limits` for the last one). The next phase is the agent
+itself: tools, a second model, and the security testing that goes with them. `make eval` is the first
+attempt at the other question — not what happened, but whether it was right — and its case set is a
+line per case in `evals/cases.jsonl` with a `why` on each.
 
 ## Where to go deeper
 

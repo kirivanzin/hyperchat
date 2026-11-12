@@ -29,18 +29,16 @@ returning an empty string, because a 200 with no text is indistinguishable from 
 which DeepSeek ignores, and a cap that is silently not applied looks exactly like one that is. It is
 the only bound this repository sets on the output.
 
-**Wall clock is bounded by a dependency, not by a decision here.** The client inherits the OpenAI
-default of a ten-minute read timeout and two retries, so a provider that hangs holds the call for
-roughly half an hour before `ProviderFailed`, and `/api/chat` waits with it because the route awaits
-the graph. Inherited, not chosen — which is the same argument as `PROVIDER_TEMPERATURE`, one layer
-down:
+**Wall clock is bounded three times, and each is a decision.** `PROVIDER_TIMEOUT_SECONDS` (default
+20) goes to the client per attempt, so a stalled provider call fails as `ProviderFailed` rather than
+living to the platform's 300s request cap; the client retries twice, so the worst case is three of
+these. `AGENT_BUDGET_SECONDS` (default 60) bounds the *run*, which is what several calls add up to —
+`agent.run()` wraps the graph in `asyncio.wait_for`. And `AGENT_MAX_STEPS` (default 6) bounds the
+graph in super-steps through LangGraph's `recursion_limit`.
 
-```
-uv run python -c 'from langchain_deepseek import ChatDeepSeek; c = ChatDeepSeek(model="x", api_key="x").root_client; print(c.timeout, c.max_retries)'
-```
-```
-Timeout(connect=5.0, read=600, write=600, pool=600) 2
-```
+The last two are the run bounds, and they answer **504 saying which one fired**:
+`StepLimitExceeded` and `BudgetExceeded` are different sentences, because a truncated answer
+returned as 200 is indistinguishable from a finished one.
 
 ## The prompt, and its hash
 
@@ -66,13 +64,25 @@ cannot say what it measured.
 `PROVIDER_TEMPERATURE` (default `0.0`, accepted range 0.0–2.0) is passed to the provider on every
 call. The default is a default, not a constant in disguise: set it and that value goes on the wire.
 
+The bounds are checked when they are read, and two of the refusals exist because the alternative
+looks like a code defect: `AGENT_MAX_STEPS=0` and an `AGENT_BUDGET_SECONDS` shorter than
+`PROVIDER_TIMEOUT_SECONDS` both fail every run, so the process refuses to start instead.
+
 ## Failures
 
 | Raised | Means | Becomes |
 |---|---|---|
 | `NotConfigured` | no provider key — the feature is off, not broken | `503` |
-| `ProviderFailed` | the provider failed; the reason is logged, never returned | `502` |
+| `ProviderFailed` | the provider failed, including its own timeout; logged, never returned | `502` |
 | `EmptyReply` | the provider answered with no usable text (a `ProviderFailed` subclass) | `502` |
+| `StepLimitExceeded` | the graph took more than `AGENT_MAX_STEPS` super-steps | `504` |
+| `BudgetExceeded` | the run outlived `AGENT_BUDGET_SECONDS` | `504` |
+
+Two more answers come from the route rather than the graph, and are not exceptions this package
+raises: **422** for a message over 4000 characters, before any provider call, and **429** with
+`Retry-After` when one subject exceeds `RATE_LIMIT_PER_MINUTE`. The limiter's state is in-process —
+per instance, forgotten at scale-to-zero — which is honest for one instance and wrong the moment
+there is more than one; `src/hyperchat/limits.py` says so where it is written.
 
 ## Attribution
 

@@ -13,8 +13,14 @@ could never pass. Everything under `/api` is behind the trust boundary, and the 
 enforces it sits on the router rather than on the routes, so adding a route there is the only step
 required to protect it.
 
-`/api/chat` is the only route that spends money, so it is the only one with two ways to be unavailable:
-503 when no provider key is configured, 502 when the provider itself fails.
+`/api/chat` is the only route that spends money, so it is the only one with five ways to fail, and
+each one is a different sentence because each one is a different thing for the caller to do:
+
+- 422 when the message is over 4000 characters, before any provider call.
+- 429 when this caller is over `RATE_LIMIT_PER_MINUTE`, with `Retry-After`.
+- 503 when no provider key is configured — the model is off, not broken.
+- 502 when the provider itself fails, including its own timeout.
+- 504 when the *run* hits a bound, and the two say which: the step ceiling or the time budget.
 """
 
 from __future__ import annotations
@@ -29,15 +35,18 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
 from hyperchat.agent import (
+    BudgetExceeded,
     NotConfigured,
     ProviderFailed,
+    StepLimitExceeded,
     close_model,
     get_model,
-    graph,
     prompt_sha256,
 )
+from hyperchat.agent import run as run_graph
 from hyperchat.auth import AuthError, Caller, NotAllowedError, UpstreamError, verify_token
-from hyperchat.config import load_settings
+from hyperchat.config import bounds, load_settings
+from hyperchat.limits import RateLimiter
 
 # Read here, not in `config`, so that importing the graph does not require an allowlist: `make chat`
 # and `langgraph dev` are tools, and a tool that needs the production trust boundary configured is a
@@ -45,6 +54,16 @@ from hyperchat.config import load_settings
 settings = load_settings()
 
 logger = logging.getLogger("hyperchat")
+
+_limiter: RateLimiter | None = None
+
+
+def rate_limiter() -> RateLimiter:
+    """The one limiter. Built on first use so importing the app does not need the environment."""
+    global _limiter
+    if _limiter is None:
+        _limiter = RateLimiter(bounds().rate_limit_per_minute)
+    return _limiter
 
 
 @asynccontextmanager
@@ -166,11 +185,29 @@ async def chat(
     body: ChatRequest, caller: Annotated[Caller, Depends(require_caller)]
 ) -> dict[str, str]:
     """One message through the graph. The subject is what makes the spend attributable to a person."""
+    retry_after = rate_limiter().check(caller.sub)
+    if retry_after is not None:
+        # The subject is the key, not the token: a caller minting a second token is the same person
+        # spending the same money, and RATE_LIMIT_PER_MINUTE is a budget rather than a token defence.
+        raise HTTPException(
+            status_code=429,
+            detail="too many requests for this subject",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     try:
-        result = await graph.ainvoke(
-            {"messages": [HumanMessage(body.message)]},
+        result = await run_graph(
+            [HumanMessage(body.message)],
             {"metadata": {"sub": caller.sub}},
         )
+    except BudgetExceeded as exc:
+        # 504, and it says which bound. A truncated answer returned as 200 is indistinguishable from
+        # a finished one, and "did it finish?" is the one thing a caller cannot work around.
+        logger.warning("run hit its budget: %s", exc)
+        raise HTTPException(status_code=504, detail="the run hit its time budget") from exc
+    except StepLimitExceeded as exc:
+        logger.warning("run hit its step limit: %s", exc)
+        raise HTTPException(status_code=504, detail="the run hit its step limit") from exc
     except NotConfigured as exc:
         # The feature is off, not broken. 503 says "not now", which is true and not the caller's fault.
         raise HTTPException(status_code=503, detail="the model is not configured") from exc

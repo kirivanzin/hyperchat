@@ -23,15 +23,17 @@ Four decisions that are cheap now and a refactor later:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from typing import Any
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_deepseek import ChatDeepSeek
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, MessagesState, StateGraph
 
-from hyperchat.config import provider_settings
+from hyperchat.config import bounds, provider_settings
 
 # The contract. This text is the agent's whole behaviour, so it is a constant rather than a parameter:
 # `call_model` prepends it to every call and no caller can omit it. It is deliberately *not* written
@@ -64,6 +66,21 @@ def prompt_sha256() -> str:
 
 class NotConfigured(Exception):
     """No provider key. The feature is off, which is not the same as broken."""
+
+
+class StepLimitExceeded(Exception):
+    """The graph took more steps than `AGENT_MAX_STEPS` allows.
+
+    A 504 rather than a 502: the provider did nothing wrong, and the run is the thing that ran out.
+    """
+
+
+class BudgetExceeded(Exception):
+    """The run outlived `AGENT_BUDGET_SECONDS`.
+
+    Also a 504. A truncated answer returned as 200 is indistinguishable from a finished one, which
+    is why the two run bounds each say which one fired rather than returning what they have.
+    """
 
 
 class ProviderFailed(Exception):
@@ -109,6 +126,10 @@ def get_model() -> ChatDeepSeek:
             # digest pin, and the only one being made here. It costs reply variety, which is a
             # product question and not this one.
             temperature=provider.temperature,
+            # Per attempt, and the client retries twice by default: the worst case is three of these,
+            # which has to be under the platform's 300s request cap. An unset timeout is the
+            # client's ten minutes, times three, which is not under it.
+            timeout=provider.timeout_seconds,
             # On the wire, by name. See the module docstring.
             max_tokens=provider.max_tokens,
         )
@@ -175,6 +196,29 @@ def _has_text(content: Any) -> bool:
                 if isinstance(text, str) and text:
                     return True
     return False
+
+
+async def run(messages: list[BaseMessage], config: RunnableConfig) -> dict[str, Any]:
+    """The graph, with the two run bounds applied and each failure named.
+
+    Both bounds are the run's rather than the node's. A graph routing in a circle is stopped by
+    `recursion_limit`, which LangGraph counts in super-steps; a run of several calls outliving its
+    usefulness is stopped by `asyncio.wait_for`, because nothing inside the graph knows what time it
+    is. The two arrive here as different exceptions so the endpoint can say which one fired.
+    """
+    limits = bounds()
+    try:
+        return await asyncio.wait_for(
+            graph.ainvoke(
+                {"messages": messages},
+                {**config, "recursion_limit": limits.max_steps},
+            ),
+            timeout=limits.budget_seconds,
+        )
+    except TimeoutError:
+        raise BudgetExceeded(f"the run exceeded its {limits.budget_seconds:g}s budget") from None
+    except GraphRecursionError:
+        raise StepLimitExceeded(f"the run exceeded its {limits.max_steps} steps") from None
 
 
 _builder = StateGraph(MessagesState)

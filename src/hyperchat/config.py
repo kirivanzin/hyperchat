@@ -7,7 +7,11 @@ Two groups, deliberately not one:
   403 to everybody without looking broken, so the failure has to be a crash rather than a
   healthy-looking process nobody can use.
 - **The model** — `provider_settings()`. The key is optional: absent means "the model is off",
-  answered 503, not a refusal to start. Read on demand rather than at import, because the graph has
+  answered 503, not a refusal to start.
+- **The bounds** — `bounds()`. A run has a step ceiling and a wall-clock budget, and one caller has a
+  rate. Two values are read together because they constrain each other: a time budget shorter than a
+  single provider call is a budget that always fails, which is a permanently broken endpoint rather
+  than a strict one. Read on demand rather than at import, because the graph has
   to be importable — `make chat`, `langgraph dev` and the acceptance command all do that — without an
   allowlist or a key, and a debugging tool that needs the production trust boundary configured is a
   tool nobody runs.
@@ -44,6 +48,9 @@ class Provider:
     # `ChatDeepSeek`'s own default is the provider's, not ours: pinning it is what makes a run
     # repeatable and a change to the default a change this repository makes.
     temperature: float = 0.0
+    # Per attempt. The client retries twice by default, so the worst case is three of these and the
+    # platform's request cap is 300s: a timeout that cannot fire first is not a timeout.
+    timeout_seconds: float = 20.0
 
 
 def _required(name: str) -> str:
@@ -85,6 +92,51 @@ def _temperature(name: str, default: float) -> float:
     return value
 
 
+@dataclass(frozen=True)
+class Bounds:
+    """What stops a run, and what stops one caller. Read together because they constrain each other."""
+
+    max_steps: int
+    budget_seconds: float
+    rate_limit_per_minute: int
+
+
+def _positive_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise RuntimeError(f"{name}={raw!r} is not a number.") from None
+    if value <= 0:
+        raise RuntimeError(f"{name}={value} is not a positive number of seconds.")
+    return value
+
+
+def bounds() -> Bounds:
+    """The run bounds. Two of these refusals are judgement, not tidiness.
+
+    A step ceiling of zero and a time budget shorter than one provider call both present as a
+    permanently broken endpoint: the first run fails, every time, for a reason that reads like a code
+    defect. Refusing to start names the value instead.
+    """
+    provider = provider_settings()
+    max_steps = _positive_int("AGENT_MAX_STEPS", 6)
+    budget_seconds = _positive_float("AGENT_BUDGET_SECONDS", 60.0)
+    if budget_seconds < provider.timeout_seconds:
+        raise RuntimeError(
+            f"AGENT_BUDGET_SECONDS={budget_seconds} is shorter than PROVIDER_TIMEOUT_SECONDS="
+            f"{provider.timeout_seconds}: every run would hit its budget during the first call, "
+            f"which is a broken endpoint rather than a strict one."
+        )
+    return Bounds(
+        max_steps=max_steps,
+        budget_seconds=budget_seconds,
+        rate_limit_per_minute=_positive_int("RATE_LIMIT_PER_MINUTE", 10),
+    )
+
+
 def load_settings() -> Settings:
     audience = _required("EXPECTED_AUDIENCE")
     configured = _required("ALLOWED_SUBS")
@@ -107,4 +159,5 @@ def provider_settings() -> Provider:
         max_tokens=_positive_int("PROVIDER_MAX_TOKENS", 256),
         api_key=os.environ.get("PROVIDER_API_KEY", "").strip() or None,
         temperature=_temperature("PROVIDER_TEMPERATURE", 0.0),
+        timeout_seconds=_positive_float("PROVIDER_TIMEOUT_SECONDS", 20.0),
     )
