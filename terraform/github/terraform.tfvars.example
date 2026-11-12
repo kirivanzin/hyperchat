@@ -1,6 +1,6 @@
 # Copy to terraform.tfvars, which is git-ignored.
 owner = "your-github-account"
 
-# Set once the agent's account exists. Until then the collaborator resource has a count of zero and
-# nothing is invited. docs/agent-identity.md is the runbook for creating the account.
-# agent_username = "the-agent-login"
+# No agent_username. The agent is not a collaborator: it participates as a stranger who has forked
+# the repository, which is what docs/agent-identity.md describes. Granting write here would be the
+# only thing in this configuration that could publish to a public repository irreversibly.

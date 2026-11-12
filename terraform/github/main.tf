@@ -26,12 +26,6 @@ variable "name" {
   default     = "hyperchat"
 }
 
-variable "agent_username" {
-  description = "The login of the account that acts as the agent. Null until that account exists; docs/agent-identity.md is the runbook for making it."
-  type        = string
-  default     = null
-}
-
 variable "default_branch" {
   description = "The branch protection attaches to. It has to exist before this root is applied in full; see docs/repository-as-code.md."
   type        = string
@@ -81,18 +75,6 @@ resource "github_branch_protection" "default" {
   #
   # `enforce_admins = true` is what makes the other two real rather than advisory for the only
   # account that exists.
-}
-
-# The account itself cannot be created here -- there is no API for signing up -- but the grant can,
-# and the grant is the part that would otherwise be a click nobody can review. `push` and not
-# `admin`: write is enough to branch, comment, review and approve, and it is the difference between
-# an identity that can be talked out of its scope and one that cannot.
-resource "github_repository_collaborator" "agent" {
-  count = var.agent_username == null ? 0 : 1
-
-  repository = github_repository.repo.name
-  username   = var.agent_username
-  permission = "push"
 }
 
 output "full_name" {
