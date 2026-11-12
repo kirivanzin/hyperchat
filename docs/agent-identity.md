@@ -224,27 +224,15 @@ still prints `1`. An outside collaborator on a public repository does not consum
 ever reads `2`, the account was added as an organisation member instead and the invitation should be
 withdrawn.
 
-## What stays local: `.secret/`
+## Where the notes go
 
-Everything about this machine that is not for publication lives in `.secret/`, which both
-`.gitignore` and `.dockerignore` name. Two files today: `agent.identity`, and a README describing the
-convention.
+The login, the numeric id and the public half of the SSH key are local notes, not repository
+content: `.gitignore` keeps them out, and none of it belongs in a public file. The token is a
+credential and lives outside every checkout, in `~/.config/hyperchat/`.
 
-`agent.identity` holds the agent account's own details from `gh api /user` — login, numeric id, and
-the public half of the SSH key. It is **not** a credential; there is no token in it.
-
-**Credentials do not go in there.** They live outside every checkout, in `~/.config/hyperchat/` and
-`~/.ssh/`. A checkout gets copied, cleaned, archived and indexed by tools that were never asked to
-keep a secret, `git clean -xdf` removes ignored files, and a `tar` of the directory carries whatever
-is in it. A directory called `.secret` is a drawer that is not locked: right for an identity, wrong
-for a key.
-
-**Neither does anything the project needs.** If the repository cannot be built or run without a
-file, that file belongs in the repository or in `docs/`.
-
-If a file in there ever turns up as *untracked*, check `core.excludesfile` before doubting
-`.gitignore`: on the machine this was set up on it pointed at a macOS path that has never existed, so
-the global ignore file had applied to nothing at all.
+One lesson worth carrying even though it cost a detour: a **global** ignore file pointed at a path
+that did not exist on this platform, so it had applied to nothing. An ignore rule in the repository
+beats one in a home directory precisely because it can be read, diffed and tested.
 
 ## What this costs
 
