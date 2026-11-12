@@ -1,7 +1,7 @@
 # hyperchat
 
-A containerised hello-world that exists to get one image into a private registry, in a way that is
-still true when there are fifty of them. No service runs yet.
+A containerised hello-world that exists to get one image into a private registry and a Cloud Run
+service, in a way that is still true when there are fifty of them.
 
 ## Layout
 
@@ -13,8 +13,10 @@ still true when there are fifty of them. No service runs yet.
 | `Makefile` | Every operation, in the order it happens. Start with `make help`. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | The Artifact Registry repository. Applied once. |
+| `terraform/app` | The Cloud Run service, its runtime identity, and the provider secret container. Applied after an image exists. |
 | `.github/workflows/ci.yml` | The tests and `terraform validate`, on every pull request. Reports; is not required. |
 | `scripts/token.sh` | `make token`: a Google ID token for the configured audience, from your own `gcloud` login. |
+| `scripts/smoke.sh` | `make smoke`: the deployed probes, and `/api/me` both without and with a token. |
 | `docs/repository-as-code.md` | What provisioning the repository costs, and why the token is not in CI. |
 | `docs/authentication.md` | Who can call a protected route, and why the allowlist — not the audience — is the gate. |
 | `docs/agent-identity.md` | The out-of-band steps for giving the agent its own account, and the two credentials that costs. |
@@ -55,7 +57,33 @@ push into the wrong project succeeds.
 
 The project id is not in this repository. `terraform/registry/terraform.tfvars` holds it and is
 git-ignored; the Makefile reads it back out of the applied state, so there is one copy of it rather
-than two that can disagree.
+than two that can disagree. `terraform/app` receives it from that state too rather than repeating it.
+
+## Deploying it to Cloud Run
+
+The registry and an image exist first; `terraform/app` creates the service and the secret container,
+not either of the things it runs from. The service uses `/livez` as its liveness probe and `/readyz`
+as readiness, which is what gates traffic. `/healthz` is deliberately not a route: Google Frontend
+reserves that exact path and never forwards it, so a probe there could never pass.
+
+`terraform/app/terraform.tfvars` is git-ignored; copy `terraform/app/terraform.tfvars.example`.
+The deployed `ALLOWED_SUBS` must not be copied from `.env`: the local list includes the agent's
+subject so it can test, and the deployed list must not contain it.
+
+A new provider secret is three steps, because a revision pointing at a secret with no version fails
+to start while the previous revision keeps serving — a deploy that appears to do nothing:
+
+```sh
+make deploy-secret         # secret container, runtime account and its one grant
+make deploy-secret-value   # the provider key from ~/.config/hyperchat/agent-deepseek.token
+make deploy                # the service, probes, and allUsers invoker
+make smoke                 # /, /livez, /readyz, and /api/me without and with a token
+```
+
+`make deploy` refuses when `terraform/app/terraform.tfstate` is absent, naming the local-state trade
+in `docs/repository-as-code.md`; it is for the machine with the variables and not the state, not for a
+bare clone. `make deploy-plan` shows the change, and `make registry-verify` shows the image the
+service is running beside the registry digest for the current tag.
 
 ## Calling it as a human
 
@@ -87,11 +115,12 @@ PROVIDER_MAX_TOKENS=5 MESSAGE='Count from one to fifty.' make chat
 ```
 
 `make chat` runs the same `graph` object the endpoint awaits — no HTTP, no token — because a debugging
-tool that is a second implementation is a tool that drifts. It needs `PROVIDER_API_KEY` in `.env`; the
-endpoint answers **503** when that is absent (the model is off, not broken) and **502** when the
-provider fails, with the reason logged and not returned. An empty reply is a 502 as well: a 200 with
-no text is indistinguishable from a truncation, and the log carries `finish_reason` so the operator
-can tell a cap set too low from a provider anomaly.
+tool that is a second implementation is a tool that drifts. It reads the provider key from
+`~/.config/hyperchat/agent-deepseek.token`, or from `PROVIDER_API_KEY` if that is already in the
+environment; the endpoint answers **503** when neither exists (the model is off, not broken) and
+**502** when the provider fails, with the reason logged and not returned. An empty reply is a 502 as
+well: a 200 with no text is indistinguishable from a truncation, and the log carries `finish_reason`
+so the operator can tell a cap set too low from a provider anomaly.
 
 ## The decisions worth knowing
 
@@ -106,9 +135,26 @@ expires.
 **No IAM bindings on the repository.** It is reachable by the project's own identities and nobody
 else. `make registry-status` prints the policy, so the absence is observed rather than assumed.
 
-**Nothing secret is in the image.** There are no secrets yet, and `.dockerignore` and `.gitignore`
-both name `*.env`, `*.pem` and `*.key` so that the day one appears it is not baked in or committed
-by accident.
+**The runtime identity has one grant.** The Cloud Run service account is not the default compute
+account, which holds `roles/editor` on this project. It has `roles/secretmanager.secretAccessor` on
+the provider secret and nothing else; the `terraform/app` output and
+`gcloud run services describe` make that checkable. The grant is attached to the secret, not the
+project, so `gcloud secrets get-iam-policy <secret>` is where it shows up.
+
+**The provider key is a Secret Manager reference, not a revision env value.** `run.viewer` can read a
+revision's environment through `gcloud run revisions describe`, so the key is read from the secret by
+the runtime identity instead. The secret container is Terraform's; the value is added from the
+git-ignored `.env` and never written to state.
+
+**`allUsers` may invoke the service.** The allowlist is the gate, not IAM, matching the audience
+decision above. The consequence is that the allowlist and the per-subject bounds are the only things
+between a public endpoint and spend; `terraform/app/main.tf` pins concurrency at four per instance and
+scale-out at one instance, so the total is four simultaneous provider calls rather than four times
+Cloud Run's default instance count.
+
+**Nothing secret is in the image.** The provider key lives in Secret Manager and is a runtime
+reference, not a build input. `.dockerignore` and `.gitignore` both name `*.env`, `*.pem` and
+`*.key` so a local one is not baked in or committed by accident.
 
 **The build is pinned by digest, and that costs something.** `Dockerfile` names
 `python:3.13-slim@sha256:…` and `ghcr.io/astral-sh/uv:0.13.7@sha256:…`, because a mutable tag means a
@@ -137,5 +183,5 @@ stays with whoever takes it next.
 
 ## Not here yet
 
-Cloud Run, a probe, rate limits. Each of them adds a mechanism that this repository does not need in
-order to do the one thing it does.
+Rate limits, streaming, and the run bounds. Each adds a mechanism that this repository does not need
+in order to run one model call honestly.

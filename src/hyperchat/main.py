@@ -2,12 +2,16 @@
 
 Two values are read at import — the expected audience and the allowlist — and the process refuses to
 start without them. That is deliberate: a service that boots with an empty allowlist answers 403 to
-everybody while its readiness probe stays green, so the failure has to be a crash rather than a
-healthy-looking process nobody can use.
+everybody without looking broken, so the failure has to be a crash rather than a healthy-looking
+process nobody can use.
 
-`/` stays open. It returns a constant and spends nothing. Everything under `/api` is behind the trust
-boundary, and the dependency that enforces it sits on the router rather than on the routes, so adding
-a route there is the only step required to protect it.
+`/` stays open. It returns a constant and spends nothing. `/livez` and `/readyz` are open too,
+because a probe cannot present a token: `/livez` answers for the process and the event loop, and
+`/readyz` reads the configuration loaded at import rather than calling the provider. `/healthz` is
+deliberately absent: Google Frontend reserves that path and never forwards it, so a probe there
+could never pass. Everything under `/api` is behind the trust boundary, and the dependency that
+enforces it sits on the router rather than on the routes, so adding a route there is the only step
+required to protect it.
 
 `/api/chat` is the only route that spends money, so it is the only one with two ways to be unavailable:
 503 when no provider key is configured, 502 when the provider itself fails.
@@ -16,6 +20,7 @@ a route there is the only step required to protect it.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -60,6 +65,35 @@ api = FastAPI(title="hyperchat", lifespan=lifespan)
 @api.get("/")
 def hello() -> dict[str, str]:
     return {"hello": "world"}
+
+
+@api.get("/livez")
+async def livez() -> dict[str, int | str]:
+    """Liveness: the process and the event loop, with no dependency checked.
+
+    An async handler is the event-loop check: a blocked loop cannot answer it. The provider is not
+    part of this answer on purpose, because an outage should not restart an otherwise healthy
+    instance.
+    """
+    return {"status": "ok", "pid": os.getpid()}
+
+
+# Both the startup and readiness probes call this route. It must read only cached state and never call
+# the provider: a provider outage here would drain every instance from traffic rather than restart one,
+# which is the opposite of what liveness is for.
+@api.get("/readyz")
+def readyz() -> dict[str, str]:
+    """Readiness: the trust boundary cached at import, never a provider call.
+
+    `load_settings()` already refuses to start without these values, so a failure here means the
+    process lost the state it booted with. The model being off is not unreadiness: `/api/chat`
+    answers 503 and the rest of the service still works.
+    """
+    if not settings.expected_audience or not settings.allowed_subs:
+        raise HTTPException(
+            status_code=503, detail="not ready: the trust boundary is not configured"
+        )
+    return {"status": "ok"}
 
 
 def require_caller(request: Request) -> Caller:

@@ -1,5 +1,5 @@
 # Every operation this repository supports, in the order it happens:
-#   github -> registry -> login -> build -> push.  `make help` lists them.
+#   github -> registry -> login -> build -> push -> deploy.  `make help` lists them.
 #
 # The image tag is the commit, not "dev", and the registry refuses to overwrite a tag
 # (docker_config.immutable_tags in terraform/registry). Two things follow, both intended: pushing the
@@ -10,14 +10,20 @@ IMAGE      ?= hyperchat
 TAG        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 REGION     ?= australia-southeast1
 REPOSITORY ?= hyperchat
+SERVICE    ?= hyperchat
+SECRET     ?= provider-api-key
 PORT       ?= 8080
 
 TERRAFORM = terraform -chdir=terraform/registry
 TERRAFORM_GITHUB = terraform -chdir=terraform/github
+TERRAFORM_APP = terraform -chdir=terraform/app
 BRANCH ?= main
 # The project is read from the applied registry root rather than repeated here. Two places holding
 # the same identifier is how an image ends up in a registry that nothing reads.
 PROJECT ?= $(shell $(TERRAFORM) output -raw project 2>/dev/null)
+# And the service URL from the applied Cloud Run root, so smoke has one address to call.
+APP_STATE ?= terraform/app/terraform.tfstate
+APP_URL ?= $(shell $(TERRAFORM_APP) output -raw url 2>/dev/null)
 # And the repository comes from the applied GitHub root, for the same reason.
 FULL_NAME ?= $(shell $(TERRAFORM_GITHUB) output -raw full_name 2>/dev/null)
 # And the organisation, from the same output, for the calls that are about seats rather than the
@@ -31,10 +37,11 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 .DEFAULT_GOAL := help
 
 .PHONY: help info lint test build dev run stop token chat github github-plan github-create github-remote \
-        github-apply github-status registry-plan registry-apply login push registry-status
+        github-apply github-status registry-plan registry-apply login push registry-status registry-verify \
+        deploy-plan deploy-secret deploy-secret-value deploy smoke
 
 help: ## Show this help
-	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 info: ## Print what the next command will use, before it uses it
 	@printf '  project     %s\n' "$(if $(PROJECT),$(PROJECT),<unset: run make registry-apply>)"
@@ -42,6 +49,8 @@ info: ## Print what the next command will use, before it uses it
 	@printf '  repository  %s\n' "$(REPOSITORY)"
 	@printf '  tag         %s\n' "$(TAG)"
 	@printf '  push to     %s\n' "$(if $(PROJECT),$(REMOTE),<unset>)"
+	@printf '  service     %s\n' "$(SERVICE)"
+	@printf '  deploy to   %s\n' "$(if $(APP_URL),$(APP_URL),<unset: run make deploy>)"
 
 lint: ## Check formatting and lint (no credentials; ruff itself comes from PyPI)
 	@uv run ruff format --check . && uv run ruff check --output-format=concise .
@@ -201,3 +210,81 @@ registry-status: ## Print the live registry and its IAM policy. An observation, 
 	@gcloud artifacts repositories get-iam-policy $(REPOSITORY) \
 		--location=$(REGION) --project=$(PROJECT) \
 		--format='value(bindings.members)'
+
+# The service image is the commit tag; `make registry-verify` shows what the service is actually
+# running beside the digest that tag resolves to. It is an observation, not a check: a service can be
+# deliberately on an older tag, and the useful answer is both values rather than a pass/fail.
+registry-verify: ## Show the deployed image and the registry digest for TAG (needs gcloud)
+	@[ -n "$(PROJECT)" ] || { \
+		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
+		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
+		exit 1; }
+	@[ -n "$(APP_URL)" ] || { \
+		echo "APP_URL is unset: there is no applied state in terraform/app." >&2; \
+		echo "run 'make deploy' once, or pass APP_URL=<url>" >&2; \
+		exit 1; }
+	@echo "== deployed image"
+	@gcloud run services describe $(SERVICE) --region=$(REGION) --project=$(PROJECT) \
+		--format='value(template.spec.containers[0].image)'
+	@echo "== registry digest for TAG=$(TAG)"
+	@gcloud artifacts docker images describe "$(REMOTE)" \
+		--project=$(PROJECT) --format='value(image_summary.digest)'
+
+# Three steps for a new secret, and the first two do not touch the service. A revision that references
+# a secret with no version fails to start while the previous revision keeps serving: it looks like a
+# deploy that did nothing, so the ordering is in the Makefile where it can be read.
+deploy-plan: ## Show what the Cloud Run root would change, without changing it
+	@[ -f $(APP_STATE) ] || { \
+		echo "$(APP_STATE) is absent: this machine has the variables but not the state." >&2; \
+		echo "That is the accepted local-state trade in docs/repository-as-code.md#the-state-is-local-and-that-is-the-decision." >&2; \
+		echo "On a first deploy, run 'make deploy-secret' first; otherwise restore the state file." >&2; \
+		exit 1; }
+	@[ -n "$(PROJECT)" ] || { \
+		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
+		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
+		exit 1; }
+	$(TERRAFORM_APP) init -input=false
+	$(TERRAFORM_APP) plan -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)"
+
+deploy-secret: ## Create the provider secret and runtime grant, without touching the service
+	@[ -n "$(PROJECT)" ] || { \
+		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
+		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
+		exit 1; }
+	$(TERRAFORM_APP) init -input=false
+	$(TERRAFORM_APP) apply -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)" \
+		-target=google_service_account.runtime \
+		-target=google_secret_manager_secret.provider_key \
+		-target=google_secret_manager_secret_iam_member.runtime_accessor
+	@echo "next: make deploy-secret-value, then make deploy"
+
+deploy-secret-value: ## Add the provider key from outside the checkout as a new secret version (needs gcloud)
+	@[ -n "$(PROJECT)" ] || { \
+		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
+		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
+		exit 1; }
+	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
+			echo "PROVIDER_API_KEY is unset: put it in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
+			exit 1; }; \
+		printf '%s' "$$PROVIDER_API_KEY" | gcloud secrets versions add $(SECRET) \
+			--project=$(PROJECT) --data-file=-
+
+deploy: ## Deploy this commit's image to Cloud Run (needs state; run make deploy-secret first)
+	@[ -f $(APP_STATE) ] || { \
+		echo "$(APP_STATE) is absent: this machine has the variables but not the state." >&2; \
+		echo "That is the accepted local-state trade in docs/repository-as-code.md#the-state-is-local-and-that-is-the-decision." >&2; \
+		echo "On a first deploy, run 'make deploy-secret' first; otherwise restore the state file." >&2; \
+		exit 1; }
+	@[ -n "$(PROJECT)" ] || { \
+		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
+		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
+		exit 1; }
+	$(TERRAFORM_APP) init -input=false
+	$(TERRAFORM_APP) apply -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)"
+
+smoke: ## Assert the deployed probes and both auth directions (needs gcloud for a token)
+	@[ -n "$(APP_URL)" ] || { \
+		echo "APP_URL is unset: there is no applied state in terraform/app." >&2; \
+		echo "run 'make deploy' once, or pass APP_URL=<url>" >&2; \
+		exit 1; }
+	@$(LOCAL_ENV); scripts/smoke.sh "$(APP_URL)"

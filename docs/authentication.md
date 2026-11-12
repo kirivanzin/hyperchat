@@ -84,9 +84,9 @@ identical in both places.
 ## Config refuses to start
 
 `EXPECTED_AUDIENCE` and `ALLOWED_SUBS` are read at import and have no defaults. A process that boots
-with an empty allowlist answers 403 to everybody while its readiness probe stays green, so the
-mistake becomes a support ticket instead of a crash. `ALLOWED_SUBS` is comma-separated, and a value
-of commas and spaces is rejected the same way an empty one is.
+with an empty allowlist answers 403 to everybody without looking broken, so the mistake becomes a
+support ticket instead of a crash. `ALLOWED_SUBS` is comma-separated, and a value of commas and
+spaces is rejected the same way an empty one is.
 
 This is also why the suite sets the two values in `tests/conftest.py` rather than the application
 defaulting them: a test value is stated where the test is, and cannot be inherited by a deployment.
