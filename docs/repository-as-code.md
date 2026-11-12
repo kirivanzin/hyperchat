@@ -39,10 +39,11 @@ repository.
 | How long | as long as the token is valid — this is the static credential the project otherwise avoids |
 | Where it is not | not in the repository, not in the image, not in `terraform.tfvars`, not in CI |
 
-**Not in `.env`.** `.env` is git-ignored and nothing reads it: `make run` passes no `--env-file`, and
-the tests set a `PATH` for a stub rather than loading one. So the reason the token lives outside the
-checkout is not that it would reach a container — it is that a checkout gets copied, cleaned, archived
-and indexed by tools that were never asked to keep a secret.
+**Not in `.env`.** `.env` is read now — `make dev` sources it and `make run` passes it with
+`--env-file` — but by the `Makefile`, never by the application, and it holds the audience and the
+allowlist rather than this token. See `docs/authentication.md` for what those do. The reason the token
+lives outside the checkout is not that it would reach a container; it is that a checkout gets copied,
+cleaned, archived and indexed by tools that were never asked to keep a secret.
 
 **Not in CI.** A workflow that can change repository settings is a workflow whose next modification
 can change repository settings. Nothing here needs it: `make push` uses the registry credential and

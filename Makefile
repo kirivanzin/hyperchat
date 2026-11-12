@@ -30,7 +30,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help info lint test dev build run stop github github-plan github-create github-remote \
+.PHONY: help info lint test build dev run stop token github github-plan github-create github-remote \
         github-apply github-status registry-plan registry-apply login push registry-status
 
 help: ## Show this help
@@ -52,11 +52,18 @@ test: ## Run the tests
 build: ## Build the image for this commit, pulling the base image
 	docker build --pull -t $(LOCAL) .
 
-dev: ## Run the app from the source tree on PORT, no image (authorise with: .env, #15)
-	uv run uvicorn hyperchat.main:api --host 127.0.0.1 --port $(PORT)
+# `.env` is read by the Makefile, not by the application. The app reads the environment and refuses to
+# start without the two values in it, so a missing value is a crash at import rather than something a
+# file quietly supplied. `set -a` exports every assignment; the `-f` guard means an absent .env is the
+# application's error, naming the value it wanted, instead of the shell's.
+dev: ## Run the app from the source tree on PORT, reading .env; no image
+	@set -a; [ -f .env ] && . ./.env; set +a; uv run uvicorn hyperchat.main:api --host 127.0.0.1 --port $(PORT)
 
-run: ## Run the image on PORT, in the foreground
-	docker run --rm --name $(IMAGE) -p $(PORT):8080 $(LOCAL)
+run: ## Run the image on PORT, with .env passed in so the fail-closed config is satisfied
+	docker run --rm --name $(IMAGE) --env-file .env -p $(PORT):8080 $(LOCAL)
+
+token: ## Print a Google ID token for EXPECTED_AUDIENCE (needs gcloud, logged in as a user)
+	@scripts/token.sh
 
 stop: ## Stop the running container
 	@docker stop $(IMAGE) 2>/dev/null || true
