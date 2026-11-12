@@ -42,7 +42,7 @@ make registry-apply         # the repository itself; once, by hand
 make login                  # docker, authorised as your own gcloud identity
 make build                  # the image, tagged with the commit
 make push                   # into the repository
-make registry-verify        # what exists, and who was granted access to it
+make registry-status        # what exists, and who was granted access to it
 ```
 
 `make info` prints the project, region, tag and destination before anything uses them, because a
@@ -63,7 +63,7 @@ static credential in a file, nothing to rotate. The token is minted by the crede
 expires.
 
 **No IAM bindings on the repository.** It is reachable by the project's own identities and nobody
-else. `make registry-verify` prints the policy, so the absence is observed rather than assumed.
+else. `make registry-status` prints the policy, so the absence is observed rather than assumed.
 
 **Nothing secret is in the image.** There are no secrets yet, and `.dockerignore` and `.gitignore`
 both name `*.env`, `*.pem` and `*.key` so that the day one appears it is not baked in or committed

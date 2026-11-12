@@ -42,11 +42,11 @@ repository-creation token there is a token inside a running process for no reaso
 
 **Not in CI.** A workflow that can change repository settings is a workflow whose next modification
 can change repository settings. Nothing here needs it: `make push` uses the registry credential and
-`make github-verify` uses the ordinary `gh` auth, neither of which is this token.
+`make github-status` uses the ordinary `gh` auth, neither of which is this token.
 
-**Not needed to verify.** `make github-verify` reads the live API through `gh`, so the check that
-the settings are what Terraform says they are does not depend on the powerful credential being
-present, or on Terraform having run.
+**Not needed to look.** `make github-status` reads the live API through `gh`, so seeing what the
+repository is actually set to does not depend on the powerful credential being present, or on
+Terraform having run.
 
 ## Why not an App
 
@@ -112,7 +112,9 @@ terraform -chdir=terraform/github plan
 reports drift between the configuration and the live repository.
 
 ```sh
-make github-verify
+make github-status
 ```
 
-prints what the API says, so the settings are observed rather than assumed.
+prints what the API says, so the settings are observed rather than assumed. It is named for what it
+does: it prints, and it cannot fail. `plan` above is the assertion, because it has something to
+compare against.
