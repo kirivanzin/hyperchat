@@ -5,6 +5,16 @@
 # and `WIF_PROVIDER` are repository variables: identifiers, not credentials; gcloud prints them
 # anyway, and the pull-request job needs them to attempt the authentication it must be refused.
 #
+# A merge only queues a deploy when it can change what runs: `scripts/deployable.sh` decides, and the
+# `changed` job below is where it is asked. A merge that touches documentation, tests or the Makefile
+# still runs this workflow and still reports — the `deploy` job is skipped, no build is pushed and no
+# human is asked to approve the production environment. **Skipped is not failed**: a skipped job is
+# neutral, the run is green, and a skipped deploy read as a red one would be worse than the queue it
+# replaces.
+#
+# `workflow_dispatch` bypasses the filter on purpose. The recovery path exists to redeploy a commit
+# after a failed apply, and that commit may well be one whose merge changed nothing deployable.
+#
 # The identity is `terraform/registry/identity.tf` (#51), applied once in the one-time root. This
 # workflow is its only consumer and can never widen it: the provider refuses any repository, ref,
 # workflow file or event other than the ones below.
@@ -29,8 +39,50 @@ permissions:
 
 
 jobs:
+  changed:
+    # `workflow_run` cannot take a `paths` filter, so the question is asked as a job whose answer the
+    # deploy job waits for. The decision is a script rather than inline shell so it can be run from a
+    # terminal against real commits, which is the only way to test it without merging something.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      deployable: ${{ steps.filter.outputs.deployable }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Two commits: the head, and the commit `main` pointed at before it. `HEAD^1` is that
+          # parent for a merge commit and for a squashed one, which is why the base is not read from
+          # the event payload — squash merges do not have two parents to read it from.
+          fetch-depth: 2
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: can this commit change what runs?
+        id: filter
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # The recovery path, stated here rather than left to an empty diff: a dispatch deploys
+            # the commit it names even when that commit changed nothing deployable.
+            echo "deployable=true" >> "$GITHUB_OUTPUT"
+            echo "workflow_dispatch: the filter is bypassed on purpose"
+            exit 0
+          fi
+          base="$(git rev-parse HEAD^1)"
+          verdict="$(scripts/deployable.sh "$base" HEAD)"
+          echo "deployable=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "deployable=${verdict}, ${base}..HEAD"
+
   deploy:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    needs: changed
+    # Skipped, not failed: a merge that cannot change what runs leaves this job neutral and the run
+    # green. `workflow_dispatch` is unconditional, and the pull-request path never deploys — it is
+    # here only for the negative job below.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       needs.changed.outputs.deployable == 'true')
     # Two deploys must not race: they would contend on the Terraform state lock, and cancelling an
     # apply half way is how the lock had to be cleared by hand. This is on the job, not on the
     # workflow, because the negative job below runs on every pull request — a workflow-level group
@@ -90,9 +142,11 @@ jobs:
           terraform_version: "1.17.1"
 
       - name: which image is this commit's?
-        # Recorded either way, because `image-digest` makes the run trust a tag rather than a build:
-        # the digest in this log is the one the deploy will use, and the one to compare against what
-        # Cloud Run reports afterwards.
+        # Recorded, not deployed: `make deploy` passes `-var="image=$(REMOTE)"`, and `REMOTE` is
+        # `registry/hyperchat:<tag>` — the tag is what the apply deploys. This digest is what the tag
+        # pointed at when the run started, and it is here to be compared with what Cloud Run reports
+        # afterwards. Deploying by tag is safe above because `docker_config.immutable_tags` in
+        # `terraform/registry` refuses to move one, which is the reason worth stating.
         id: digest
         run: |
           set -eu
