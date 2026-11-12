@@ -71,6 +71,11 @@ returned from `/api/me` for display and is never compared to decide anything.
 - **the provider key** is read from `~/.config/hyperchat/agent-deepseek.token` — mode 600, outside every
   checkout — unless `PROVIDER_API_KEY` is already set in the environment.
 
+**A `.env` that sets `PROVIDER_API_KEY` is refused**, not preferred. Defaulting would have been the
+quieter design and the wrong one: two sources with an order between them means a stale key in a checkout
+shadows the correct one, silently, and the rule that credentials do not live in a checkout becomes a
+default rather than a rule.
+
 The reason is not that `.env` would be committed; it is git-ignored. It is that a checkout gets copied,
 cleaned, archived and indexed by tools that were never asked to keep a secret, and a rule with one
 exception is a rule that gets forgotten. The container mounts that same file, so the mechanism is

@@ -63,7 +63,11 @@ build: ## Build the image for this commit, pulling the base image
 # because a checkout gets copied, archived, cleaned and indexed by tools that were never asked to keep
 # a secret, and the rule that says so is easier to keep when it has no exception. `make dev` put a
 # credential in a checkout the first time it was used, which is what this line exists to stop.
-LOCAL_ENV = set -a; [ -f .env ] && . ./.env; set +a; \
+LOCAL_ENV = if [ -f .env ] && grep -qE '^[[:space:]]*(export[[:space:]]+)?PROVIDER_API_KEY=' .env; then \
+              echo "PROVIDER_API_KEY is in .env, and it is a credential: it does not go in a checkout." >&2; \
+              echo "keep it in $$HOME/.config/hyperchat/agent-deepseek.token, or export it for one command." >&2; \
+              exit 1; fi; \
+            set -a; [ -f .env ] && . ./.env; set +a; \
             if [ -z "$$PROVIDER_API_KEY" ] && [ -f "$$HOME/.config/hyperchat/agent-deepseek.token" ]; then \
               PROVIDER_API_KEY=$$(cat "$$HOME/.config/hyperchat/agent-deepseek.token"); export PROVIDER_API_KEY; fi
 
