@@ -63,14 +63,23 @@ import os
 import re
 import sys
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from hyperchat.agent import NotConfigured, ProviderFailed, close_model, graph, prompt_sha256
+from hyperchat.agent import (
+    BudgetExceeded,
+    NotConfigured,
+    ProviderFailed,
+    StepLimitExceeded,
+    close_model,
+    prompt_sha256,
+)
+from hyperchat.agent import run as run_graph
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / "evals" / "cases.jsonl"
@@ -118,6 +127,9 @@ class Case:
     expects: dict[str, Any]
     why: str
     max_tokens: int | None = None
+    # Environment for this case only, restored afterwards: a bound is set by the same variables the
+    # service reads, so a case that measures a bound sets it rather than describing it.
+    env: dict[str, str] | None = None
     # The group whose rate this case is one sample of. A group has an owner and, once the owner has
     # landed, a threshold; see `GROUPS`.
     group: str | None = None
@@ -135,6 +147,8 @@ class Reply:
     """
 
     text: str
+    # Which bound the run hit, if it hit one. A 504 from the service is this, seen from the route.
+    raised: str | None = None
     finish_reason: str | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
@@ -192,6 +206,7 @@ def load_cases(path: Path) -> list[Case]:
             "expects",
             "why",
             "max_tokens",
+            "env",
             "group",
             "known_failure",
         }
@@ -208,6 +223,7 @@ def load_cases(path: Path) -> list[Case]:
                 expects=raw["expects"],
                 why=raw["why"],
                 max_tokens=raw.get("max_tokens"),
+                env=raw.get("env"),
                 group=raw.get("group"),
                 known_failure=raw.get("known_failure"),
             )
@@ -270,6 +286,9 @@ CHECKERS: dict[str, Callable[[Reply, Any], str | None]] = {
         None
         if len(reply.text.strip()) >= least
         else f"min_chars: {len(reply.text.strip())} < {least}"
+    ),
+    "raises": lambda reply, expected: (
+        None if reply.raised == expected else f"raises: expected {expected}, got {reply.raised!r}"
     ),
     "finish_reason": lambda reply, expected: (
         None
@@ -355,8 +374,25 @@ def baseline_reply(case: Case, strategy: Callable[[Case], str]) -> Reply:
 
 # --- the run -----------------------------------------------------------------------------------
 
+
 # The cap the client was last built with. A case that changes it closes the client first, so the
 # change goes through `provider_settings()` and `get_model()` rather than around them.
+@contextmanager
+def _environment(overrides: dict[str, str] | None) -> Iterator[None]:
+    """Set variables for one case and put them back, whatever they were before."""
+    previous = {name: os.environ.get(name) for name in (overrides or {})}
+    for name, value in (overrides or {}).items():
+        os.environ[name] = value
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 _pinned: int | None = None
 
 
@@ -371,14 +407,26 @@ async def _pin(max_tokens: int | None) -> None:
 
 
 async def ask(case: Case) -> Reply:
-    """One case through the graph the service serves, with the cap this case asks for."""
+    """One case through the run the service performs, with the cap and any bound this case asks for."""
     await _pin(case.max_tokens)
     started = time.perf_counter()
-    result = await graph.ainvoke(
-        {"messages": [HumanMessage(case.input)]},
-        # The same subject `make chat` sends: a subject for the record, not a claim about a person.
-        {"metadata": {"sub": "eval"}},
-    )
+    # The same entry point the endpoint and `make chat` use, so the run bounds apply here rather than
+    # being described here: a case that measures a bound has to go through the code that enforces it.
+    with _environment(case.env):
+        try:
+            result = await run_graph(
+                [HumanMessage(case.input)],
+                # The same subject `make chat` sends: a subject for the record, not a claim about a
+                # person.
+                {"metadata": {"sub": "eval"}},
+            )
+        except (StepLimitExceeded, BudgetExceeded) as stopped:
+            # A bound is a result: it says which one fired, which is what a 504 carries.
+            return Reply(
+                text=str(stopped),
+                raised=type(stopped).__name__,
+                latency_ms=round((time.perf_counter() - started) * 1000),
+            )
     latency_ms = round((time.perf_counter() - started) * 1000)
     message = result["messages"][-1]
     usage = getattr(message, "usage_metadata", None) or {}
@@ -422,6 +470,7 @@ def write_records(results: list[Result], path: Path) -> None:
                         "prompt_tokens": result.reply.prompt_tokens,
                         "completion_tokens": result.reply.completion_tokens,
                         "prompt_sha256": prompt_sha256(),
+                        "raised": result.reply.raised,
                     }
                 )
                 + "\n"

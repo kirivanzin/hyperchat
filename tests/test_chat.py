@@ -20,7 +20,13 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_deepseek import ChatDeepSeek
 
 from hyperchat import agent, chat
-from hyperchat.agent import NotConfigured, ProviderFailed, graph
+from hyperchat.agent import (
+    BudgetExceeded,
+    NotConfigured,
+    ProviderFailed,
+    StepLimitExceeded,
+    graph,
+)
 from hyperchat.auth import Caller
 from hyperchat.config import Provider, load_settings, provider_settings
 from hyperchat.main import api, require_caller
@@ -39,6 +45,18 @@ REPLY = {
     ],
     "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
 }
+
+
+@pytest.fixture(autouse=True)
+def fresh_limiter(monkeypatch):
+    """One window per test: a limiter that survives between tests is a test that passes in isolation.
+
+    The app builds it lazily and keeps it, which is right for a process and wrong for a suite that
+    posts more than `RATE_LIMIT_PER_MINUTE` times across its whole life.
+    """
+    from hyperchat import main
+
+    monkeypatch.setattr(main, "_limiter", main.RateLimiter(per_minute=10_000))
 
 
 @pytest.fixture
@@ -219,6 +237,64 @@ def test_the_prompt_hash_is_computed_from_the_prompt():
     assert len(agent.prompt_sha256()) == 64
 
 
+# --- the bounds -----------------------------------------------------------------------------------
+
+
+def test_the_rate_limit_is_429_with_retry_after(caller, monkeypatch):
+    """RATE_LIMIT_PER_MINUTE is per subject, and the refusal says how long to wait."""
+    from hyperchat import main
+
+    monkeypatch.setattr(main, "_limiter", main.RateLimiter(per_minute=2))
+    monkeypatch.setattr(agent, "_model", recorded_model([], max_tokens=8))
+
+    assert client.post("/api/chat", json={"message": "hi"}).status_code == 200
+    assert client.post("/api/chat", json={"message": "hi"}).status_code == 200
+    refused = client.post("/api/chat", json={"message": "hi"})
+
+    assert refused.status_code == 429
+    assert 1 <= int(refused.headers["Retry-After"]) <= 60
+
+
+def test_the_run_bounds_are_504_and_say_which(caller, monkeypatch):
+    """Two bounds, two sentences: "did it finish?" is the one thing a caller cannot work around."""
+    from hyperchat import main
+
+    async def out_of_steps(*_args, **_kwargs):
+        raise StepLimitExceeded("the run exceeded its 6 steps")
+
+    async def out_of_time(*_args, **_kwargs):
+        raise BudgetExceeded("the run exceeded its 60s budget")
+
+    monkeypatch.setattr(main, "run_graph", out_of_steps)
+    steps = client.post("/api/chat", json={"message": "hi"})
+    assert steps.status_code == 504
+    assert "step limit" in steps.json()["detail"]
+
+    monkeypatch.setattr(main, "run_graph", out_of_time)
+    budget = client.post("/api/chat", json={"message": "hi"})
+    assert budget.status_code == 504
+    assert "time budget" in budget.json()["detail"]
+
+
+def test_the_provider_timeout_is_sent_to_the_client(monkeypatch):
+    """The bound that stops a stalled call living to the platform's 300s cap."""
+    seen: list[dict] = []
+    recorded = {}
+
+    def build(**kwargs):
+        recorded.update(kwargs)
+        return recorded_model(seen, **kwargs)
+
+    monkeypatch.setattr(agent, "_model", None)
+    monkeypatch.setenv("PROVIDER_API_KEY", "test-key")
+    monkeypatch.setenv("PROVIDER_TIMEOUT_SECONDS", "7.5")
+    monkeypatch.setattr(agent, "ChatDeepSeek", build)
+
+    agent.get_model()
+
+    assert recorded["timeout"] == 7.5
+
+
 # --- the three answers ----------------------------------------------------------------------------
 
 
@@ -376,7 +452,7 @@ def test_the_cli_exits_3_when_the_model_is_off(monkeypatch, capsys):
     async def noop() -> None:
         return None
 
-    monkeypatch.setattr(chat, "graph", type("G", (), {"ainvoke": staticmethod(refuse)})())
+    monkeypatch.setattr(chat, "run_graph", refuse)
     monkeypatch.setattr(chat, "close_model", noop)
 
     assert chat.main(["chat", "hi"]) == 3
@@ -390,11 +466,27 @@ def test_the_cli_exits_4_when_the_provider_fails(monkeypatch, capsys):
     async def noop() -> None:
         return None
 
-    monkeypatch.setattr(chat, "graph", type("G", (), {"ainvoke": staticmethod(fail)})())
+    monkeypatch.setattr(chat, "run_graph", fail)
     monkeypatch.setattr(chat, "close_model", noop)
 
     assert chat.main(["chat", "hi"]) == 4
     assert "TimeoutError" in capsys.readouterr().err
+
+
+def test_the_cli_exits_4_and_names_the_bound_that_fired(monkeypatch, capsys):
+    """A tool that says "failed" and no more is a tool nobody reaches for."""
+
+    async def out_of_steps(*_args: object, **_kwargs: object) -> object:
+        raise StepLimitExceeded("the run exceeded its 6 steps")
+
+    async def noop() -> None:
+        return None
+
+    monkeypatch.setattr(chat, "run_graph", out_of_steps)
+    monkeypatch.setattr(chat, "close_model", noop)
+
+    assert chat.main(["chat", "hi"]) == 4
+    assert "step limit" in capsys.readouterr().err
 
 
 def test_the_cli_prints_the_reply(monkeypatch, capsys):
@@ -404,7 +496,7 @@ def test_the_cli_prints_the_reply(monkeypatch, capsys):
     async def noop() -> None:
         return None
 
-    monkeypatch.setattr(chat, "graph", type("G", (), {"ainvoke": staticmethod(reply)})())
+    monkeypatch.setattr(chat, "run_graph", reply)
     monkeypatch.setattr(chat, "close_model", noop)
 
     assert chat.main(["chat", "hi"]) == 0

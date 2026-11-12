@@ -10,6 +10,9 @@ REGION     ?= australia-southeast1
 REPOSITORY ?= hyperchat
 SERVICE    ?= hyperchat
 PORT       ?= 8080
+# How many requests `make limits` expects to be allowed before 429. Small on purpose: each allowed
+# request is a provider call, and the check is about the boundary rather than the throughput.
+LIMIT      ?= 3
 
 TERRAFORM = terraform -chdir=terraform/registry
 TERRAFORM_GITHUB = terraform -chdir=terraform/github
@@ -45,7 +48,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 .DEFAULT_GOAL := help
 
 .PHONY: help info lint test eval build dev run stop token chat github github-plan github-create github-remote \
-        github-apply github-status pipeline-audit registry-plan registry-apply login push \
+        github-apply github-status pipeline-audit registry-plan registry-apply login push limits \
         registry-status registry-verify image-exists image-digest deploy-plan deploy smoke
 
 help: ## Show this help
@@ -65,6 +68,13 @@ lint: ## Check formatting and lint (no credentials; ruff itself comes from PyPI)
 
 test: ## Run the tests
 	uv run pytest -q
+
+limits: ## Assert the per-caller rate limit: LIMIT requests allowed, the next two refused
+	@[ -n "$(APP_URL)" ] || { \
+		echo "APP_URL is unset: there is no applied state in terraform/app." >&2; \
+		echo "run 'make deploy' once, or pass APP_URL=<url>" >&2; \
+		exit 1; }
+	@$(LOCAL_ENV); scripts/limits.sh "$(APP_URL)" "$(LIMIT)"
 
 eval: ## Every case in the dataset through the graph, beside a baseline that is not a model
 	@$(LOCAL_ENV); uv run python scripts/eval.py
