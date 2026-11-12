@@ -412,6 +412,9 @@ def render(results: list[Result], records: Path) -> str:
             lines.append(
                 f"  {result.case.id}: declared {declared}, got {result.failures or 'pass'}"
             )
+            # The reply, because a predicate that fired for an unexpected reason is a change in the
+            # model or in the case, and either way the text is the thing to look at.
+            lines.append(f"    reply: {result.reply.text.strip()[:200]!r}")
     return "\n".join(lines)
 
 
