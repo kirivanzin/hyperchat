@@ -32,10 +32,10 @@ Twelve PRs here exist only because the repository is public:
 | `#49` | Dependabot's interpreter ignore |
 
 A private build would commit `terraform.tfvars` and state, give CI a service-account key, grant
-`roles/editor`, let the bot push, and force-push the history once. This repository pays roughly
-35–40% of the day instead, and buys properties a reviewer can check: no identifier in the tree, a
-Workload Identity condition a stranger can read and test, a fork that proves the negative direction,
-and a history that does not need rewriting.
+`roles/editor`, let the bot push, and force-push the history once. This repository pays roughly a
+third of its pull requests instead — twelve of thirty-four — and buys properties a reviewer can
+check: no identifier in the tree, a Workload Identity condition a stranger can read and test, a fork
+that proves the negative direction, and a history that does not need rewriting.
 
 ## Layout
 
