@@ -53,7 +53,7 @@ import os
 import re
 import sys
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -323,10 +323,13 @@ async def ask(case: Case) -> Reply:
     )
 
 
-async def evaluate(cases: Iterable[Case], ask: Callable[[Case], Any]) -> list[Result]:
+async def evaluate(
+    cases: Iterable[Case], answer: Callable[[Case], Awaitable[Reply]]
+) -> list[Result]:
+    """Run every case and judge it. The reply function is a parameter so a test can supply one."""
     results = []
     for case in cases:
-        reply = await ask(case)
+        reply = await answer(case)
         results.append(Result(case=case, reply=reply, failures=check(case.expects, reply)))
     return results
 
