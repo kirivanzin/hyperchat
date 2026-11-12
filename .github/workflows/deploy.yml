@@ -82,15 +82,32 @@ jobs:
         with:
           terraform_version: "1.17.1"
 
+      - name: is this commit's image already pushed?
+        # The tag is the commit and the registry refuses to overwrite a tag, which is the property
+        # that makes an image traceable. The consequence is that a deploy which fails *after* the
+        # push cannot be retried by re-running the job — the retry dies on `make push` before it
+        # reaches the step that failed. This makes the pipeline re-runnable without weakening the
+        # registry: if the tag is there, this commit's image is there, and pushing it again would
+        # change nothing that the tag means.
+        id: image
+        run: |
+          if make image-exists; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "the image for this commit is already in the registry; build and push are skipped"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: authenticate Docker
+        if: steps.image.outputs.exists == 'false'
         run: make login
 
       - name: build the image
+        if: steps.image.outputs.exists == 'false'
         run: make build
 
       - name: push the image
-        # The tag is the dispatched commit, and the registry refuses to overwrite a tag: a re-run of
-        # the same commit fails here rather than republishing. That is the existing property.
+        if: steps.image.outputs.exists == 'false'
         run: make push
 
       - name: deploy
