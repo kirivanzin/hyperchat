@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars, which is git-ignored.
+#
+# `make deploy` reads the project from the applied registry root and passes it, and passes the image
+# for this commit, so neither is repeated here. For a manual plan, supply both:
+#   terraform -chdir=terraform/app plan -var="project=your-project-id" -var="image=..."
+
+# The audience a gcloud user token carries. Not secret.
+expected_audience = "32555940559.apps.googleusercontent.com"
+
+# Comma-separated subjects allowed to spend. Do NOT copy ALLOWED_SUBS from .env: that list includes
+# the agent's subject so it can test locally, and the deployed list must not contain it.
+allowed_subs = "a-human-subject"

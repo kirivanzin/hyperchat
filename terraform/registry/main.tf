@@ -46,7 +46,7 @@ resource "google_artifact_registry_repository" "images" {
 
 # No IAM resource, and that absence is the setting. The repository is reachable by the project's own
 # identities and nobody else; granting a reader is a change with a reason attached, not a default.
-# `make registry-verify` prints the policy so the absence is observable rather than assumed.
+# `make registry-status` prints the policy so the absence is observable rather than assumed.
 
 output "project" {
   description = "Read by the Makefile, so the image path has one source of truth."

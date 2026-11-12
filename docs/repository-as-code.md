@@ -100,14 +100,15 @@ someone remembers.
 
 ## The state is local, and that is the decision
 
-Both Terraform roots use local state: `terraform/github/terraform.tfstate` and
-`terraform/registry/terraform.tfstate`. Each is git-ignored by `*.tfstate`, exists only in the
-checkout that applied it, and has no locking and no spare copy. It is the only copy.
+All three Terraform roots use local state: `terraform/github/terraform.tfstate`,
+`terraform/registry/terraform.tfstate` and `terraform/app/terraform.tfstate`. Each is git-ignored by
+`*.tfstate`, exists only in the checkout that applied it, and has no locking and no spare copy. It
+is the only copy.
 
-Remote state is a bucket, and a bucket is another bootstrap: a third root applied by hand, before
-there is a service whose state anyone would mind losing. That is real work paid now to solve a
-problem nobody has yet — one operator, one laptop, and a destroy that can only come from the
-checkout holding the state — so the decision is to keep local state and write the consequence down.
+Remote state is a bucket, and a bucket is another bootstrap: a fourth root applied by hand. That is
+real work paid now to solve a problem nobody has yet — one operator, one laptop, and a destroy that
+can only come from the checkout holding the state — so the decision is to keep local state and write
+the consequence down.
 
 What breaks without it is bounded, and worth stating exactly: the resources keep running — Cloud Run
 does not need Terraform to stay up — but Terraform can no longer manage them, so recovery is an

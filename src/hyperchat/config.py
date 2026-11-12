@@ -4,8 +4,8 @@ Two groups, deliberately not one:
 
 - **The trust boundary** — `EXPECTED_AUDIENCE` and `ALLOWED_SUBS`. `load_settings()` fails without
   them, and the app calls it at import. A process that booted with an empty allowlist would answer
-  403 to everybody while its readiness probe stayed green, so the failure has to be a crash rather
-  than a healthy-looking process nobody can use.
+  403 to everybody without looking broken, so the failure has to be a crash rather than a
+  healthy-looking process nobody can use.
 - **The model** — `provider_settings()`. The key is optional: absent means "the model is off",
   answered 503, not a refusal to start. Read on demand rather than at import, because the graph has
   to be importable — `make chat`, `langgraph dev` and the acceptance command all do that — without an
@@ -48,7 +48,7 @@ def _required(name: str) -> str:
     if not value:
         raise RuntimeError(
             f"{name} is unset and has no default. The service refuses to start without it: an "
-            f"empty allowlist serves 403 to everybody while readiness stays green. Set it in "
+            f"empty allowlist serves 403 to everybody without looking broken. Set it in "
             f".env (see {DOCS}) or in the environment of whatever is starting this process."
         )
     return value

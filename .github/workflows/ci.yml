@@ -51,12 +51,13 @@ jobs:
       - name: terraform validate
         # `init -backend=false` first, and the ticket's one-liner is not enough on a fresh checkout:
         # `validate` needs the provider package that `init` puts in `.terraform/providers`, and on a
-        # clone that directory does not exist. `-backend=false` because there is no backend to
-        # configure -- state is local and git-ignored -- and no credential either, which is why this
-        # can run on a fork's pull request with a read-only token.
+        # clone that directory does not exist. `-backend=false` because state is local and
+        # git-ignored, and no credential is needed to validate any of the three roots.
         run: |
-          terraform -chdir=terraform/github init -backend=false -input=false
-          terraform -chdir=terraform/github validate
+          for root in terraform/github terraform/registry terraform/app; do
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate
+          done
 
       - name: build the image
         # Builds and discards it. There is no registry credential in this job and none is wanted: the
