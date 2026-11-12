@@ -262,6 +262,28 @@ deploy: ## Deploy this commit's image, secret version and service to Cloud Run i
 		echo "PROJECT is unset: there is no applied state in terraform/registry." >&2; \
 		echo "run 'make registry-apply' once, or pass PROJECT=<id>" >&2; \
 		exit 1; }
+	@command -v gcloud >/dev/null 2>&1 || { \
+		echo "could not ask the registry about $(REMOTE): gcloud is not installed." >&2; \
+		exit 2; }
+	@err=$$(gcloud artifacts docker images describe "$(REMOTE)" --project=$(PROJECT) \
+			--format='value(image_summary.digest)' 2>&1) || { \
+		if printf '%s' "$$err" | grep -qiE 'image .*not found|not_found'; then \
+			echo "no image $(REMOTE) exists." >&2; \
+			echo "Either it was never pushed, or this checkout is not the commit you think:" >&2; \
+			echo "TAG comes from git rev-parse --short HEAD ($(TAG)); the registry has:" >&2; \
+			tags=$$(gcloud artifacts docker tags list "$(REGISTRY)/$(IMAGE)" --project=$(PROJECT) \
+				--format='value(tag)' 2>&1) || { \
+					echo "could not list the tags either:" >&2; \
+					printf '%s\n' "$$tags" >&2; \
+					exit 1; }; \
+			if [ -n "$$tags" ]; then printf '%s\n' "$$tags" | sed 's/^/  /' >&2; else echo "  (none)" >&2; fi; \
+			exit 1; \
+		else \
+			echo "could not ask the registry about $(REMOTE):" >&2; \
+			printf '%s\n' "$$err" >&2; \
+			exit 2; \
+		fi; \
+	}
 	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \

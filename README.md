@@ -85,6 +85,11 @@ argument, so the key is never in state or the plan file, and the revision names 
 than `latest`. A deploy with no change creates no new version; bump `provider_key_version` to rotate
 the key deliberately.
 
+Before Terraform runs, `make deploy` checks that the image for `TAG` exists in the registry and names
+the tags that do. A checkout whose commit was never pushed fails there, rather than halfway through a
+Cloud Run update. If the registry cannot be asked — no `gcloud`, no login, no permission — it says
+that and shows gcloud's own error instead of claiming the image is missing.
+
 `make deploy` refuses when `terraform/app/terraform.tfstate` is absent, naming the local-state trade
 in `docs/repository-as-code.md`; it is for the machine with the variables and not the state, not for a
 bare clone. `make deploy-plan` shows the change, and `make registry-verify` shows the image the
