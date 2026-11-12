@@ -1,0 +1,128 @@
+# Deploying by hand, through the pipeline, until the two values have a home a runner can read.
+#
+# `workflow_dispatch` and nothing else, for now. That is a deliberate shape rather than a first
+# draft: this workflow never runs on its own, so it cannot turn a green `ci` run into a red deploy
+# run, and it stores no configuration anywhere. The three inputs are supplied at dispatch time —
+# `PROJECT` and `ALLOWED_SUBS` from `.env`, `WIF_PROVIDER` from `terraform output`. "Use `.env` for
+# now" is exact about that: the file is not in the tree, so the values are typed for the run and
+# nothing is kept afterwards but the run's own metadata.
+#
+# The identity is `terraform/registry/identity.tf` (#51), applied once in the one-time root. This
+# workflow is its only consumer and can never widen it: the provider refuses any repository but
+# `saxeum/hyperchat`, and any ref but `refs/heads/main`.
+#
+# When the values have a home a runner can reach — an `environment` holding them is the option on
+# #43 — this gains `workflow_run` on `ci` for `main`, the environment, and the pull-request job that
+# asserts a non-main ref cannot authenticate. None of those can work without stored configuration,
+# which is why they are not here yet.
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "GCP project id (terraform/registry/terraform.tfvars)"
+        required: true
+        type: string
+      allowed_subs:
+        description: "The DEPLOYED allowlist. Not the one in .env: that one includes the agent."
+        required: true
+        type: string
+      wif_provider:
+        description: "terraform -chdir=terraform/registry output -raw deployer_provider"
+        required: true
+        type: string
+
+# Nothing here writes the repository. The OIDC token is the only extra capability, and only the job
+# that needs it asks for it.
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # The image build is the slow step; twenty minutes bounds a stalled registry pull rather than
+    # letting the default six hours hold a runner.
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT: ${{ inputs.project }}
+      ALLOWED_SUBS: ${{ inputs.allowed_subs }}
+      WIF_PROVIDER: ${{ inputs.wif_provider }}
+      # `terraform/app` requires this and has no default. It is the deployed allowlist, so it is the
+      # input, never `.env`.
+      TF_VAR_allowed_subs: ${{ inputs.allowed_subs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: require configuration
+        # Before anything authenticates: an empty input is a wrong invocation, not a failed deploy.
+        run: |
+          set -eu
+          : "${PROJECT:?input project is unset}"
+          : "${ALLOWED_SUBS:?input allowed_subs is unset}"
+          : "${WIF_PROVIDER:?input wif_provider is unset}"
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.PROJECT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          # Derived from the project id, which is also what the address of the account is: the
+          # account was created by terraform/registry/identity.tf with this name.
+          service_account: hyperchat-deployer@${{ env.PROJECT }}.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: ">= 363.0.0"
+          project_id: ${{ env.PROJECT }}
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+
+      - name: authenticate Docker
+        run: make login
+
+      - name: build the image
+        run: make build
+
+      - name: push the image
+        # The tag is the dispatched commit, and the registry refuses to overwrite a tag: a re-run of
+        # the same commit fails here rather than republishing. That is the existing property.
+        run: make push
+
+      - name: deploy
+        # The provider key is write-only to Terraform, not absent from the apply. Read the existing
+        # Secret Manager version into this process's environment; `make deploy` passes it as
+        # TF_VAR_provider_api_key and Terraform stores it neither in state nor in the plan file.
+        run: |
+          set -eu
+          PROVIDER_API_KEY="$(gcloud secrets versions access latest \
+            --secret=provider-api-key --project="$PROJECT")"
+          export PROVIDER_API_KEY
+          make deploy
+
+      - name: the service answers
+        # Both of these need no user token, which is exactly why they belong here. `make smoke` needs
+        # a token minted by a person and stays a human step.
+        run: |
+          set -eu
+          URL="$(gcloud run services describe hyperchat --region australia-southeast1 \
+            --project "$PROJECT" --format='value(status.url)')"
+          livez="$(curl -sS -o /dev/null -w '%{http_code}' "$URL/livez")"
+          me="$(curl -sS -o /dev/null -w '%{http_code}' "$URL/api/me")"
+          echo "livez=$livez api/me=$me url=$URL"
+          test "$livez" = 200
+          test "$me" = 401
+
+      - name: what the apply left, if it failed
+        # A half-applied state is the failure this repository has produced twice; the plan says what
+        # was left behind, and a log without it turns a page into an investigation.
+        if: failure()
+        run: |
+          PROVIDER_API_KEY="$(gcloud secrets versions access latest \
+            --secret=provider-api-key --project="$PROJECT")" || true
+          export PROVIDER_API_KEY
+          make deploy-plan || true
