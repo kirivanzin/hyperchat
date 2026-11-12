@@ -196,14 +196,23 @@ resource "google_cloud_run_v2_service" "service" {
 
       # `/readyz` gates traffic: it reads the configuration cached at import and never calls the
       # provider. `/livez` is the liveness answer: the process and its event loop, no dependency.
+      # 60 seconds, not 6. The app answers /readyz in ~3s on a developer machine with a warm page
+      # cache; on a revision whose image import took 5.8s the same startup exceeded 6 seconds and the
+      # instance was killed before uvicorn printed its first line — ERROR_CONNECTION_FAILED, no
+      # application logs, and a deploy that looks like a broken image rather than a slow one.
+      #
+      # This is the sibling root's working budget, 12 x 5s, kept as-is: a startup probe is the place to
+      # be generous, because the cost of being wrong is a failed deploy and the cost of extra seconds
+      # is seconds.
       startup_probe {
         http_get {
           path = "/readyz"
           port = 8080
         }
-        period_seconds    = 2
-        timeout_seconds   = 1
-        failure_threshold = 3
+        initial_delay_seconds = 5
+        period_seconds        = 5
+        timeout_seconds       = 3
+        failure_threshold     = 12
       }
 
       liveness_probe {
