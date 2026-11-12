@@ -118,6 +118,30 @@ owners of one fact — deliberate for now, because a new project needs an owner 
 repository, and otherwise `make registry-apply` cannot provision one. Two states managing one API is
 harmless while neither destroys it.
 
+## The environment is `dev`, and it is not a development environment
+
+There is one deployment, and it is recorded under the GitHub environment `dev`. It is not a
+development environment in the sense that word usually carries: it is public, it answers
+`allUsers`, and the provider key it reads is the real one — the allowlist is the only thing
+bounding who can spend, and its blast radius is production-shaped. What it lacks is a second
+environment to promote from. `#78` is where production stops being a name, and the gate comes back
+with it.
+
+`dev` has no protection rules on purpose. There was one environment called `production`, gated by
+a required reviewer who was also the only person merging, so the approval was the same person
+twice — which trains a reviewer to click rather than read. The gate belongs on something it can
+protect, and `production` is kept, empty, so that is where it lands. Until then the merge is the
+approval and the `ci` check is the gate: the deploy still proves `/livez` is 200 and `/api/me` is
+401 afterwards, and a bad revision is rolled back by shifting traffic rather than by redeploying.
+
+Renaming an environment does not make it safe, which is why the paragraph above is the price of
+this one rather than a footnote to it.
+
+The secret is per environment: `ALLOWED_SUBS` on `dev` is the deployed allowlist, not the `.env`
+list, which includes the contributor's subject. Environment secrets are visible only to jobs that
+name their environment, so moving the job without moving the secret is a deploy that fails at
+`require configuration` — loudly, which is the right failure.
+
 ## What keeps this honest
 
 ```sh

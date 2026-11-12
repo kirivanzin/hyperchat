@@ -3,11 +3,14 @@
 #
 #   scripts/deployable.sh BASE HEAD
 #
-# A merge to `main` queues a deploy, and that deploy asks a human to approve the production
-# environment before it can start. That is right for a change to the service and wrong for the rest:
-# `ad5fe91` (the eval harness) touched no `src/`, no `Dockerfile`, no dependency and no
-# `terraform/app`, and it still queued a build, a push under a new tag, and an approval request. The
-# deploy was cancelled; the queue was still the defect.
+# A merge to `main` queues a deploy. Since the one environment is `dev` and it has no protection
+# rules, what that queues is a build, a push under a new tag, and a revision whose image is the one
+# already serving. For a change that cannot alter the image, the first two are waste and the third
+# moves the recorded revision for nothing.
+#
+# `ad5fe91` (the eval harness) is the case: it touched no `src/`, no `Dockerfile`, no dependency and
+# no `terraform/app`, and it still queued all three. The deploy was cancelled; the queue was still
+# the defect.
 #
 # The set below is the judgement this repository reserves. It is what the deployed artefact is made
 # of: the source, the image definition, the dependency pin, the interpreter, the Terraform that

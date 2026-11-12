@@ -2,7 +2,7 @@
 
 The deployed artefact is made of the source, the image definition, the dependency pin, the
 interpreter, `terraform/app` and this workflow. Everything else can land without queuing a build, a
-push under a new tag, and a request for a human to approve the production environment.
+push under a new tag, and a deploy that would change nothing but the revision string.
 
 The case that matters is `false`: a filter that says `true` for everything passes its own tests and
 changes nothing (issue #75). So most of this file is the not-deployable half, including the paths

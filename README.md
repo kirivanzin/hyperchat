@@ -93,6 +93,11 @@ the Workload Identity provider on this repository, `refs/heads/main`, this workf
 events that run it — so a new workflow on `main` cannot inherit it. Five scoped grants, no project
 admin. Nothing in CI can widen it.
 
+**There is one environment and it is called `dev`, which is not a claim that it is safe.** It is
+public, holds the provider key, and the allowlist is the only thing bounding who can spend; it has no
+reviewer because the only reviewer was also the only merger. `#78` brings the gate back with an
+environment it can protect, and `docs/repository-as-code.md` argues the whole of it.
+
 **Only the root a merge applies keeps its state in a bucket.** `terraform/app` is remote and
 prefix-scoped, so a runner reaches it and two deploys take turns. `terraform/registry` and
 `terraform/github` are applied once by a human and keep local state. The project id is not in the

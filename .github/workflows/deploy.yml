@@ -1,16 +1,21 @@
 # Deploying on a merge, and by dispatch when a failed apply needs recovery.
 #
-# Both entry points use the same production environment and identity. The environment holds the
-# deployed allowlist as a secret, which GitHub masks in step headers as well as log lines. `PROJECT`
-# and `WIF_PROVIDER` are repository variables: identifiers, not credentials; gcloud prints them
-# anyway, and the pull-request job needs them to attempt the authentication it must be refused.
+# Both entry points use the same `dev` environment and identity. The environment holds the deployed
+# allowlist as a secret, which GitHub masks in step headers as well as log lines. `PROJECT` and
+# `WIF_PROVIDER` are repository variables: identifiers, not credentials; gcloud prints them anyway,
+# and the pull-request job needs them to attempt the authentication it must be refused.
+#
+# `dev` has no protection rules, so `main` goes live on merge and the `ci` check is the only gate.
+# That is a decision, not an omission: the one environment is not a staging one — it is public, holds
+# the provider key, and the allowlist is the only thing bounding who can spend — so a second approval
+# from the person who just merged would be a habit rather than a second pair of eyes. `#78` is where
+# the gate returns, with an environment it can actually protect.
 #
 # A merge only queues a deploy when it can change what runs: `scripts/deployable.sh` decides, and the
 # `changed` job below is where it is asked. A merge that touches documentation, tests or the Makefile
-# still runs this workflow and still reports — the `deploy` job is skipped, no build is pushed and no
-# human is asked to approve the production environment. **Skipped is not failed**: a skipped job is
-# neutral, the run is green, and a skipped deploy read as a red one would be worse than the queue it
-# replaces.
+# still runs this workflow and still reports — the `deploy` job is skipped and no build is pushed.
+# **Skipped is not failed**: a skipped job is neutral, the run is green, and a skipped deploy read as
+# a red one would be worse than the queue it replaces.
 #
 # `workflow_dispatch` bypasses the filter on purpose. The recovery path exists to redeploy a commit
 # after a failed apply, and that commit may well be one whose merge changed nothing deployable.
@@ -90,8 +95,10 @@ jobs:
     concurrency:
       group: deploy-hyperchat
       cancel-in-progress: false
-    # The production environment is where the allowlist lives and where a reviewer is required.
-    environment: production
+    # The environment the allowlist lives on, and the name the deployment is recorded under. It has
+    # no protection rules: the merge is the approval while there is only one environment, and #78 is
+    # where a reviewer comes back with an environment to protect.
+    environment: dev
     # The image build is the slow step; twenty minutes bounds a stalled registry pull rather than
     # letting the default six hours hold a runner.
     timeout-minutes: 20
@@ -107,8 +114,9 @@ jobs:
       ALLOWED_SUBS: ${{ secrets.ALLOWED_SUBS }}
       TF_VAR_allowed_subs: ${{ secrets.ALLOWED_SUBS }}
       # There is nobody here to answer `terraform apply`'s approval prompt, and a runner's stdin does
-      # not close: a dispatch sat on that prompt holding the state lock until it was cancelled. The
-      # approval is the environment reviewer, or the merge for an automatic run.
+      # not close: a dispatch sat on that prompt holding the state lock until it was cancelled. There
+      # is no environment reviewer on `dev` either, so the approval is the merge, the dispatch, or
+      # the `ci` check that has to be green before either reaches this job.
       AUTO_APPROVE: -auto-approve
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -208,7 +216,7 @@ jobs:
   ref-not-main-cannot-auth:
     # The provider's condition allows only refs/heads/main, workflow_dispatch/workflow_run and this
     # workflow file. This job proves the pull-request direction is refused, and does not use the
-    # production environment or its allowlist.
+    # `dev` environment or its allowlist.
     #
     # A fork pull request is skipped, and the skip is stated here rather than left to an empty
     # variable: a fork does not receive repository variables, so a condition that only tested `vars`
