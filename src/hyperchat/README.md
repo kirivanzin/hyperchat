@@ -27,8 +27,20 @@ returning an empty string, because a 200 with no text is indistinguishable from 
 
 `PROVIDER_MAX_TOKENS` (default 256) goes on the wire as `max_tokens` — not `max_completion_tokens`,
 which DeepSeek ignores, and a cap that is silently not applied looks exactly like one that is. It is
-the only output bound. **Nothing bounds wall clock**: a hung provider holds the call until the client
-gives up, and there is no timeout of our own.
+the only bound this repository sets on the output.
+
+**Wall clock is bounded by a dependency, not by a decision here.** The client inherits the OpenAI
+default of a ten-minute read timeout and two retries, so a provider that hangs holds the call for
+roughly half an hour before `ProviderFailed`, and `/api/chat` waits with it because the route awaits
+the graph. Inherited, not chosen — which is the same argument as `PROVIDER_TEMPERATURE`, one layer
+down:
+
+```
+uv run python -c 'from langchain_deepseek import ChatDeepSeek; c = ChatDeepSeek(model="x", api_key="x").root_client; print(c.timeout, c.max_retries)'
+```
+```
+Timeout(connect=5.0, read=600, write=600, pool=600) 2
+```
 
 ## The prompt, and its hash
 
