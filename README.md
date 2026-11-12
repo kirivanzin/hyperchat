@@ -74,3 +74,5 @@ by accident.
 
 Cloud Run, a probe, authentication, rate limits, CI. Each of them adds a mechanism that this
 repository does not need in order to do the one thing it does.
+
+<!-- proposed by the agent account during a capability test -->
