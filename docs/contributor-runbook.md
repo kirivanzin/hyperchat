@@ -1,7 +1,7 @@
 # The contributor's account: setup steps
 
-The argument for this shape is `docs/contributor.md`. This is the procedure, and it is consulted rather
-than read.
+The argument for this shape is `docs/contributor.md`. This is the procedure, and it is consulted
+rather than read.
 
 Everything marked *you* is out of band, once, because no API exists for it.
 
@@ -48,11 +48,11 @@ It is half of the noreply address in step 7, and looking it up later is harder t
 ssh-keygen -t ed25519 -f ~/.ssh/hyperchat-agent -C hyperchat-agent -N ''
 ```
 
-No passphrase, because the coding agent cannot type one — which means **the file is the credential**:
-`chmod 600`, and it lives outside every repository.
+No passphrase, because the coding agent cannot type one — which means **the file is the
+credential**: `chmod 600`, and it lives outside every repository.
 
-Two accounts on `github.com` cannot both offer their keys by default, so give the contributor its own host
-alias:
+Two accounts on `github.com` cannot both offer their keys by default, so give the contributor its
+own host alias:
 
 ```
 Host github-agent
@@ -117,9 +117,9 @@ git clone git@github-agent:saxeum/hyperchat.git ~/agent/hyperchat
 ```
 
 The trailing slash makes `gitdir:` a prefix match. `sshCommand` means a clone made with the wrong
-remote URL still pushes as the contributor. The empty `credential.helper` **clears** an inherited helper:
-if `~/.gitconfig` sets `helper = store`, a plaintext credential cache holding the other account's
-token would otherwise be offered on this one's behalf, successfully and silently.
+remote URL still pushes as the contributor. The empty `credential.helper` **clears** an inherited
+helper: if `~/.gitconfig` sets `helper = store`, a plaintext credential cache holding the other
+account's token would otherwise be offered on this one's behalf, successfully and silently.
 
 ### Prove it before committing, not after
 
@@ -133,8 +133,8 @@ commit lands under the wrong name.
 
 ### What no configuration can fix
 
-- **A stale `GH_TOKEN` in the shell.** It overrides `gh auth`, so `gh` can act as the contributor while git
-  acts as you. Nothing in git config can see it.
+- **A stale `GH_TOKEN` in the shell.** It overrides `gh auth`, so `gh` can act as the contributor
+  while git acts as you. Nothing in git config can see it.
 - **`git commit --author=`** changes the author and leaves you as committer.
 - **One directory.** If both identities commit in one tree, no config can tell them apart.
 

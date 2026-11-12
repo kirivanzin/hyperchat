@@ -1,8 +1,8 @@
 # The coding agent joins as a contributor
 
-The contributor account `kirivanzin` is a real GitHub account with its own SSH key, its own token and
-its own checkout. It is not a collaborator: it joins by fork, and every one of its pull requests is
-reviewed and merged by the owner.
+The contributor account `kirivanzin` is a real GitHub account with its own SSH key, its own
+token and its own checkout. It is not a collaborator: it joins by fork, and every one of its pull
+requests is reviewed and merged by the owner.
 
 The point is not trust. It is that a principal which cannot publish to this repository cannot damage
 it, whatever it decides to do.
@@ -47,9 +47,12 @@ inherited one.
 A separate clone, not a linked worktree: `gitdir:` matches the *git* directory, and a worktree's is
 `<main>/.git/worktrees/<name>`, so a rule for the contributor's directory would not fire there.
 
-The paths keep the word `agent` — `git@github-agent`, `~/.ssh/hyperchat-agent`, `~/agent/hyperchat` —
-because those are names on a machine rather than claims about a principal. It is this repository's
-prose that distinguishes them.
+The machine keeps the word in several places: `git@github-agent`, `~/.ssh/hyperchat-agent`,
+`~/.gitconfig-agent`, `~/agent/hyperchat`, `~/.config/hyperchat/agent-deepseek.token` and its mount
+at `/run/agent-deepseek`, and the ignored `.agent.identity`. Those are names on a machine rather
+than claims about a principal, which is why this prose does not use them. The misnamed one is
+`agent-deepseek.token` — it is the provider key — and it is the next to go, once the three mounts
+outside this repository move with it.
 
 ## What the account can actually do
 

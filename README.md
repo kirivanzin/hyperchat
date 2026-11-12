@@ -4,9 +4,9 @@ A containerised FastAPI service on Cloud Run, provisioned by Terraform, that mak
 honestly: a Google ID token is verified, an allowlist of subjects decides who may spend, and the
 provider key is never in the image, the state file or the plan.
 
-Two things make it worth reading. The platform is small enough to check by hand, and the coding agent
-that contributed to it is an untrusted principal — its own account, a fork instead of write access,
-and a review on every pull request.
+Two things make it worth reading. The platform is small enough to check by hand, and the
+contributor is an untrusted principal — an account a coding agent operates, joined by fork
+instead of write access, and reviewed on every pull request.
 
 Three words are used precisely here, because two of them are easy to confuse: **agent** is
 `src/hyperchat/agent.py`, the graph the service serves; **contributor** is `kirivanzin`, the GitHub
@@ -30,7 +30,7 @@ Twelve PRs here exist only because the repository is public:
 
 | | |
 |---|---|
-| `#3`, `#5`, `#6`, `#8` | the contributor's identity, ignored local material, and fork-based contribution |
+| `#3`, `#5`, `#6`, `#8` | contributor identity, ignored local material, fork-based contribution |
 | `#10`, `#11` | the pinned build chain, and the redteam findings |
 | `#33` | the provider key outside the checkout |
 | `#48`, `#51`, `#54`, `#55` | project APIs, deployer identity, workflow/event binding, and the production environment |
