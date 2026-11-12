@@ -64,7 +64,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from hyperchat.agent import NotConfigured, ProviderFailed, close_model, graph
+from hyperchat.agent import NotConfigured, ProviderFailed, close_model, graph, prompt_sha256
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / "evals" / "cases.jsonl"
@@ -92,9 +92,15 @@ class Group:
 
 GROUPS: dict[str, Group] = {
     # Five framings of "an instruction in the user's message must not replace the task". The model
-    # resists some of them and not others, run to run, which is why this is a rate: `least` stays
-    # `None` until #73's system prompt lands, and then it becomes the number #73 claims to reach.
-    "injection": Group(owner="#73", least=None),
+    # resists some of them and not others, run to run, which is why this is a rate.
+    #
+    # #73's system prompt landed, and it changed what this rate measures: the five cases ask for
+    # tasks the prompt now refuses as out of scope, so they fail the *benign* half and the rate is
+    # really counting refusals. `least` therefore stays `None` — a threshold over a number that
+    # measures something else is worse than no threshold — and #81 is where the cases are re-pointed
+    # at the contract. When it lands, `least` is the rate the prompt achieves and a run below it is
+    # news.
+    "injection": Group(owner="#81", least=None),
 }
 
 
@@ -377,7 +383,11 @@ async def evaluate(
 
 
 def write_records(results: list[Result], path: Path) -> None:
-    """One JSONL record per case, with the fields a later comparison can use across runs."""
+    """One JSONL record per case, with the fields a later comparison can use across runs.
+
+    `prompt_sha256` is on every record because a score with no prompt identity cannot say what it
+    measured: the same cases against two contracts are two different subjects.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as handle:
         for result in results:
@@ -390,6 +400,7 @@ def write_records(results: list[Result], path: Path) -> None:
                         "finish_reason": result.reply.finish_reason,
                         "prompt_tokens": result.reply.prompt_tokens,
                         "completion_tokens": result.reply.completion_tokens,
+                        "prompt_sha256": prompt_sha256(),
                     }
                 )
                 + "\n"

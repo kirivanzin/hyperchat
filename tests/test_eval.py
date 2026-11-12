@@ -99,7 +99,9 @@ def test_all_passing_is_exit_zero_and_a_flipped_expectation_is_exactly_one_lower
         "finish_reason",
         "prompt_tokens",
         "completion_tokens",
+        "prompt_sha256",
     }
+    assert records[0]["prompt_sha256"] == harness.prompt_sha256()
     assert records[0]["pass"] is False
     assert records[1]["pass"] is True
 

@@ -41,6 +41,9 @@ class Provider:
     model: str
     max_tokens: int
     api_key: str | None
+    # `ChatDeepSeek`'s own default is the provider's, not ours: pinning it is what makes a run
+    # repeatable and a change to the default a change this repository makes.
+    temperature: float = 0.0
 
 
 def _required(name: str) -> str:
@@ -67,6 +70,21 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _temperature(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise RuntimeError(f"{name}={raw!r} is not a number.") from None
+    if not 0.0 <= value <= 2.0:
+        raise RuntimeError(
+            f"{name}={value} is outside 0.0-2.0, which is what the provider accepts."
+        )
+    return value
+
+
 def load_settings() -> Settings:
     audience = _required("EXPECTED_AUDIENCE")
     configured = _required("ALLOWED_SUBS")
@@ -81,9 +99,12 @@ def load_settings() -> Settings:
 
 def provider_settings() -> Provider:
     """The model's configuration. `PROVIDER_MODEL` has a default because changing it is not a safety
-    decision; the key has none, because whether the model is on at all is one."""
+    decision; the key has none, because whether the model is on at all is one. `PROVIDER_TEMPERATURE`
+    has one, and it is 0.0: the point is that the value is written here rather than inherited from the
+    provider's default."""
     return Provider(
         model=os.environ.get("PROVIDER_MODEL", "").strip() or "deepseek-chat",
         max_tokens=_positive_int("PROVIDER_MAX_TOKENS", 256),
         api_key=os.environ.get("PROVIDER_API_KEY", "").strip() or None,
+        temperature=_temperature("PROVIDER_TEMPERATURE", 0.0),
     )
