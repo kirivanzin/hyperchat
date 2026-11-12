@@ -20,6 +20,9 @@ BRANCH ?= main
 PROJECT ?= $(shell $(TERRAFORM) output -raw project 2>/dev/null)
 # And the repository comes from the applied GitHub root, for the same reason.
 FULL_NAME ?= $(shell $(TERRAFORM_GITHUB) output -raw full_name 2>/dev/null)
+# And the organisation, from the same output, for the calls that are about seats rather than the
+# repository. One identifier, one home.
+OWNER ?= $(firstword $(subst /, ,$(FULL_NAME)))
 
 REGISTRY = $(REGION)-docker.pkg.dev/$(PROJECT)/$(REPOSITORY)
 LOCAL    = $(IMAGE):$(TAG)
@@ -89,16 +92,45 @@ github-apply: ## Apply the rest, so branch protection lands once the branch exis
 	$(TERRAFORM_GITHUB) init -input=false
 	$(TERRAFORM_GITHUB) apply -input=false
 
-github-status: ## Print the live repository settings and protection. An observation, not a check
+# Who can reach the repository is not in the Terraform root: the agent joins as a fork, so there is
+# no collaborator resource to drift and, equally, nothing to notice a collaborator added by hand.
+#
+# Three states, and two of them look identical from the wrong endpoint: a member or owner is in
+# `collaborators` and not in `?affiliation=outside`; an accepted outside collaborator is in
+# `?affiliation=outside`; an invitation not yet accepted is in neither, only in `/invitations`.
+# Reading the accepted list alone makes "no access" and "invited, never clicked" the same output.
+# `?affiliation=all` is deliberately not used: it reports the owner as `admin`, so a line meant for
+# the agent would describe the owner. `filled_seats` is read because a seat going from 1 to 2 is how
+# a grant added as membership — the half that costs money — becomes visible.
+#
+# Every line prints when the answer is nothing, and says `unreadable` rather than `none` when the API
+# refuses or the field is absent: an absence that was never asked for is not an absence, and a target
+# that stops at the first refusal cannot report on the rest. The exit status is non-zero if anything
+# was unreadable, so this stays an observation rather than a check, and still fails when it is blind.
+github-status: ## Print the live repository settings, protection and access. An observation, not a check
 	@[ -n "$(FULL_NAME)" ] || { \
 		echo "FULL_NAME is unset: no applied state in terraform/github." >&2; \
 		echo "run 'make github-create' once, or pass FULL_NAME=owner/name" >&2; \
 		exit 1; }
-	@gh api /repos/$(FULL_NAME) >/dev/null && echo "repository $(FULL_NAME) exists"
-	@gh api /repos/$(FULL_NAME) \
-		--jq '{visibility, security: (.security_and_analysis | map_values(.status))}'
-	@gh api /repos/$(FULL_NAME)/branches/$(BRANCH)/protection \
-		--jq '{admins: .enforce_admins.enabled, force_push: .allow_force_pushes.enabled, deletion: .allow_deletions.enabled, reviews: .required_pull_request_reviews, checks: .required_status_checks}'
+	@failed=0; err=$$(mktemp); trap 'rm -f "$$err"' EXIT; \
+	report() { \
+		label=$$1; shift; pad=''; [ -z "$$label" ] || pad=$$(printf '  %-22s ' "$$label"); \
+		if out=$$("$$@" 2>"$$err"); then printf '%s%s\n' "$$pad" "$$out"; \
+		else failed=1; printf '%sunreadable: %s\n' "$$pad" "$$(tr '\n' ' ' <"$$err")"; fi; }; \
+	report '' gh api /repos/$(FULL_NAME) \
+		--jq '"repository " + .full_name + " exists"'; \
+	report '' gh api /repos/$(FULL_NAME) \
+		--jq '{visibility, security: (.security_and_analysis | map_values(.status))}'; \
+	report '' gh api /repos/$(FULL_NAME)/branches/$(BRANCH)/protection \
+		--jq '{admins: .enforce_admins.enabled, force_push: .allow_force_pushes.enabled, deletion: .allow_deletions.enabled, reviews: .required_pull_request_reviews, checks: .required_status_checks}'; \
+	echo "== access"; \
+	report 'outside collaborators' gh api "/repos/$(FULL_NAME)/collaborators?affiliation=outside" \
+		--jq '[.[] | "\(.login) (\(.role_name))"] | if length == 0 then "none" else join(", ") end'; \
+	report 'pending invitations' gh api "/repos/$(FULL_NAME)/invitations" \
+		--jq '[.[] | "\(.id) (\(.invitee.login))"] | if length == 0 then "none" else join(", ") end'; \
+	report 'org filled seats' gh api "/orgs/$(OWNER)" \
+		--jq '.plan.filled_seats // "unreadable: no plan in the response"'; \
+	exit $$failed
 
 registry-plan: ## Show what the registry root creates, without creating it
 	$(TERRAFORM) init -input=false
