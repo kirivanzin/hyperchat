@@ -266,7 +266,8 @@ resource "google_cloud_run_v2_service" "service" {
         period_seconds    = 5
         timeout_seconds   = 1
         failure_threshold = 3
-        success_threshold = 1
+        # No success threshold: the provider reads 0 for a field the API stores as 2, so any
+        # configured value makes every plan a change. The API default is what revisions already run.
       }
     }
   }
