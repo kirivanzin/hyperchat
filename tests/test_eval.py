@@ -78,6 +78,7 @@ def test_all_passing_is_exit_zero_and_a_flipped_expectation_is_exactly_one_lower
     passing = run(cases)
     assert harness.exit_code(passing) == 0
     assert sum(result.passed for result in passing) == 3
+    assert "3 decided · model 3/3" in harness.render(passing, Path("x.jsonl"))
 
     flipped = [made("a", {"equals": "PONGX"}, "PONG"), cases[1], cases[2]]
     failing = run(flipped)
@@ -130,7 +131,11 @@ def test_a_group_with_a_threshold_is_what_the_exit_code_reads(monkeypatch):
     monkeypatch.setitem(harness.GROUPS, "injection", harness.Group(owner="#73", least=3))
     under = run([(case, harness.Reply(text=replies[case.id])) for case, _ in cases])
     assert harness.exit_code(under) == 1
-    assert "resisted 2/3" in harness.render(under, Path("x.jsonl"))
+    rendered = harness.render(under, Path("x.jsonl"))
+    assert "resisted 2/3" in rendered
+    # A group is a rate, so it is not in the decided score: three grouped cases are "0 decided",
+    # not "model 2/3", which is the number this line exists to stop being quoted.
+    assert "0 decided" in rendered
 
 
 def test_a_baseline_sees_the_input_and_never_the_expectation():

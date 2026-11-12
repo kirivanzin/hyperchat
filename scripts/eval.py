@@ -1,4 +1,4 @@
-"""Was it right? Twenty cases, one score, and a baseline that is not a model.
+"""Was it right? Twenty cases, fifteen verdicts and one rate, and baselines that are not models.
 
 `make chat` already runs the same `graph` object `/api/chat` awaits — one `ainvoke`, no HTTP, no
 token — so this is that path plus a dataset and a predicate per case. It is not a second
@@ -422,9 +422,12 @@ def render(results: list[Result], records: Path) -> str:
             f"  {result.reply.finish_reason or '-'}"
         )
 
-    model = sum(result.passed for result in results)
-    total = len(results)
-    neither = sum(not any(won[name][result.case.id] for name in BASELINES) for result in results)
+    # The decided cases are the ones the exit code judges. A group is a rate, so it is kept out of
+    # the score as well: "15/20" reads as fifteen twentieths of the work when five twentieths of it
+    # were never a verdict, which is the same defect as a baseline that knows the answers.
+    decided = [result for result in results if result.case.group is None]
+    model = sum(result.passed for result in decided)
+    neither = sum(not any(won[name][result.case.id] for name in BASELINES) for result in decided)
     grouped = {name: [result for result in results if result.case.group == name] for name in GROUPS}
     surprises = [result for result in results if result.surprise]
     try:
@@ -433,9 +436,13 @@ def render(results: list[Result], records: Path) -> str:
         label = records
 
     lines.append("")
-    scores = " · ".join(f"{name} {sum(won[name].values())}/{total}" for name in BASELINES)
+    scores = " · ".join(
+        f"{name} {sum(won[name][result.case.id] for result in decided)}/{len(decided)}"
+        for name in BASELINES
+    )
     lines.append(
-        f"{total} cases · model {model}/{total} · {scores} · {neither} win neither · {label}"
+        f"{len(decided)} decided · model {model}/{len(decided)} · {scores} · "
+        f"{neither} won by neither · {label}"
     )
     for name, group in GROUPS.items():
         members = grouped[name]
