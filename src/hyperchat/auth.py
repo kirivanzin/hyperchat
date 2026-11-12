@@ -1,8 +1,8 @@
 """What it takes to be accepted as a caller.
 
-The token is a Google ID token, and the audience is the id a gcloud *user* token carries
-(`32555940559.apps.googleusercontent.com`). That choice decides the security model, so it is worth
-stating where the code is rather than only in a document: verification proves Google vouched for
+The token is a Google ID token, and the audience is the id a gcloud *user* token carries. That
+choice decides the security model, so it is worth stating where the code is rather than only in a
+document: verification proves Google vouched for
 somebody, and **anybody with a Google account and `gcloud` can obtain such a token**. The allowlist
 on `sub` is therefore the actual gate, and the only thing bounding cost.
 
