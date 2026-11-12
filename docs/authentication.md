@@ -103,6 +103,16 @@ printf 'EXPECTED_AUDIENCE=%s\nALLOWED_SUBS=%s\n' '<client id>' '<your sub>' > .e
 make dev
 ```
 
+`<your sub>` is a Google subject, so it is not something you can look up or compute — you read it out
+of a real token:
+
+```sh
+make token-info
+```
+
+prints the decoded header and claims. The claim to copy is `sub`, not `email`: the subject survives an
+email rename and is never reissued, which is why the allowlist is keyed on it.
+
 With `.env` absent, the same command fails at import and names the missing variable.
 
 ## Calling it

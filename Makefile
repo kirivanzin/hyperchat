@@ -89,6 +89,12 @@ run: ## Run the image on PORT, with .env passed in so the fail-closed config is 
 token: ## Print a Google ID token for EXPECTED_AUDIENCE (needs gcloud, logged in as a user)
 	@scripts/token.sh
 
+# The claims are the point, and one of them is the allowlist key. `sub` is what `ALLOWED_SUBS` matches
+# — not `email`, which is for display — and reading it out of a real token is the only way to know it,
+# because it is a Google subject rather than anything this repository mints or can compute.
+token-info: ## Decode the header and claims of a freshly minted token
+	@$(MAKE) --no-print-directory token | python3 -c 'import base64,json,sys; p=sys.stdin.read().strip().split("."); d=lambda s: json.loads(base64.urlsafe_b64decode(s+"="*(-len(s)%4))); print(json.dumps({"header":d(p[0]),"claims":d(p[1])},indent=2,sort_keys=True))' 
+
 # The same graph the endpoint serves, run directly: no HTTP and no token, because authentication is a
 # property of the route rather than of the graph. This is the debugging tool, and it is the object
 # that runs in the service rather than a second implementation of it.
