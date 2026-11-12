@@ -58,8 +58,14 @@ def get_model() -> ChatDeepSeek:
     """The one client, built on first use.
 
     Lazy so that importing the graph — which `langgraph dev`, `make chat` and the acceptance command
-    all do — does not require a key. The app's lifespan calls this at startup so the connection is
-    established then rather than on the first request.
+    all do — does not require a key. The app's lifespan calls this at startup so the client exists
+    before the first request rather than inside it.
+
+    That is the whole of what startup establishes. `ChatDeepSeek` opens no socket when it is
+    constructed, so no connection exists until the first call and a key that is present but wrong is
+    not a boot failure — it is that call's 502. What startup buys is the other failure: an unset key
+    is a warning at boot instead of a 503 discovered by a caller. `close_model` closes the pools the
+    construction did create.
     """
     global _model
     if _model is None:
