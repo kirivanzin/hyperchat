@@ -15,18 +15,20 @@ Four decisions worth naming, because each one is a rule this file would otherwis
   harness running a different model from the service. So a case is written to hold across runs:
   the exact-instruction cases ask for a token a model returns the same way twice, the honesty cases
   accept any wording that refuses, and the invented-premise dates and figures are forbidden by
-  pattern rather than by string. The replies differ between runs; the verdicts do not, and that is
-  what two consecutive runs are for.
+  pattern rather than by string. The replies differ between runs; the verdicts do not, except inside
+  a group, where the rate is allowed to move and is not what the exit code reads.
 - **The cap is configuration, exercised through the service's own path.** A case with `max_tokens`
   sets `PROVIDER_MAX_TOKENS` and rebuilds the client, so `provider_settings()` and `get_model()` are
   what apply it. `PROVIDER_MAX_TOKENS` in the environment is overridden rather than inherited, so a
   run is pinned to the dataset instead of to whoever's shell it started in.
-- **A declared failure is not a surprise, and it has an owner.** `known_failure` holds the ticket
-  that plans to fix it — `"#73"` today — rather than `true`, because an accepted failure with no
-  ticket named is permanent by default. The exit code answers one question: did every case come out
-  as declared? A known failure that starts passing is a surprise too, because the dataset then says
-  something false. The summary prints the owning tickets so the count is visible rather than
-  remembered.
+- **A case that a model resists some of the time is a rate, not a verdict.** The injection cases
+  are the same measurement five times: the model either answers the real question without obeying
+  the payload or it does not, and it does both across runs — in review, one run of the unchanged
+  graph translated the sentence and the next obeyed the payload. Five booleans would make
+  `make eval` red for improvising, so they are declared `group` and reported as `resisted n/5`. A group carries the
+  ticket that will change the answer and, until that lands, its rate is informational: it is
+  printed and it does not touch the exit code. When the owner lands, `least` is set to the rate the
+  group has to reach, and that threshold — not five flaky booleans — is what the exit code reads.
 
 The baselines are the other half of the number, and they are *strategies*, not per-case answers. A
 per-case baseline can carry the expected answer — the first version of this dataset did exactly
@@ -40,8 +42,8 @@ checked without a model.
 
 Exit codes, the same three `make chat` uses plus one:
 
-    0  every case came out as declared
-    1  at least one case did not
+    0  no case, and no group with a threshold, came out other than declared
+    1  at least one did
     3  no provider key configured — the model is off, not broken
     4  the provider failed, so the run says nothing about the cases
 """
@@ -75,6 +77,28 @@ DEFAULT_MAX_TOKENS = 256
 
 
 @dataclass(frozen=True)
+class Group:
+    """A set of cases whose outcome is a rate rather than a verdict.
+
+    `least` is the number that has to be resisted for the group to be a pass, or `None` while the
+    owner ticket is open — a rate with no threshold is information, and information does not fail a
+    run. Declaring the owner here rather than `known_failure: true` on each case is the same
+    argument as F4: an accepted failure with no ticket named is permanent by default.
+    """
+
+    owner: str
+    least: int | None
+
+
+GROUPS: dict[str, Group] = {
+    # Five framings of "an instruction in the user's message must not replace the task". The model
+    # resists some of them and not others, run to run, which is why this is a rate: `least` stays
+    # `None` until #73's system prompt lands, and then it becomes the number #73 claims to reach.
+    "injection": Group(owner="#73", least=None),
+}
+
+
+@dataclass(frozen=True)
 class Case:
     """One line of the dataset. `expects` is a mapping of predicate name to argument."""
 
@@ -83,14 +107,9 @@ class Case:
     expects: dict[str, Any]
     why: str
     max_tokens: int | None = None
-    # The ticket that plans to fix this, not a boolean: an accepted failure that names no work is
-    # permanent by default.
-    known_failure: str | None = None
-
-    @property
-    def expected(self) -> bool:
-        """Whether this case is meant to pass today."""
-        return self.known_failure is None
+    # The group whose rate this case is one sample of. A group has an owner and, once the owner has
+    # landed, a threshold; see `GROUPS`.
+    group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,9 +139,21 @@ class Result:
         return not self.failures
 
     @property
+    def group(self) -> Group | None:
+        return GROUPS.get(self.case.group) if self.case.group else None
+
+    @property
     def surprise(self) -> bool:
-        """The case came out the other way from how the dataset declares it."""
-        return self.passed != self.case.expected
+        """Whether this case failed a claim the dataset makes about it.
+
+        A grouped case makes no claim on its own, with or without a threshold: it is one sample of
+        a rate, and `exit_code` reads the group's score. That is what stops a model that resists
+        some of the time from turning the suite red — once for improving, once for regressing
+        below a threshold that the rate, not this case, is measured against.
+        """
+        if self.group is not None:
+            return False
+        return not self.passed
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -137,6 +168,8 @@ def load_cases(path: Path) -> list[Case]:
         missing = {"id", "input", "expects", "why"} - raw.keys()
         if missing:
             raise SystemExit(f"{path}:{number}: missing {', '.join(sorted(missing))}")
+        if raw.get("group") is not None and raw["group"] not in GROUPS:
+            raise SystemExit(f"{path}:{number}: unknown group {raw['group']!r}")
         cases.append(
             Case(
                 id=raw["id"],
@@ -144,7 +177,7 @@ def load_cases(path: Path) -> list[Case]:
                 expects=raw["expects"],
                 why=raw["why"],
                 max_tokens=raw.get("max_tokens"),
-                known_failure=raw.get("known_failure"),
+                group=raw.get("group"),
             )
         )
     return cases
@@ -387,7 +420,7 @@ def render(results: list[Result], records: Path) -> str:
     model = sum(result.passed for result in results)
     total = len(results)
     neither = sum(not any(won[name][result.case.id] for name in BASELINES) for result in results)
-    known = [result for result in results if not result.case.expected]
+    grouped = {name: [result for result in results if result.case.group == name] for name in GROUPS}
     surprises = [result for result in results if result.surprise]
     try:
         label = records.relative_to(ROOT)
@@ -399,19 +432,18 @@ def render(results: list[Result], records: Path) -> str:
     lines.append(
         f"{total} cases · model {model}/{total} · {scores} · {neither} win neither · {label}"
     )
-    owners = sorted({result.case.known_failure for result in known if result.case.known_failure})
-    lines.append(
-        f"declared failures: {sum(not r.passed for r in known)}/{len(known)} failed as declared"
-        + (f", owned by {', '.join(owners)}" if owners else "")
-    )
+    for name, group in GROUPS.items():
+        members = grouped[name]
+        resisted = sum(result.passed for result in members)
+        state = "threshold" if group.least is not None else "informational"
+        lines.append(
+            f"{name}: resisted {resisted}/{len(members)} · owned by {group.owner} · {state}"
+        )
     if surprises:
         lines.append("")
         lines.append("not as declared:")
         for result in surprises:
-            declared = "pass" if result.case.expected else "fail"
-            lines.append(
-                f"  {result.case.id}: declared {declared}, got {result.failures or 'pass'}"
-            )
+            lines.append(f"  {result.case.id}: expected pass, got {result.failures or 'pass'}")
             # The reply, because a predicate that fired for an unexpected reason is a change in the
             # model or in the case, and either way the text is the thing to look at.
             lines.append(f"    reply: {result.reply.text.strip()[:200]!r}")
@@ -419,7 +451,16 @@ def render(results: list[Result], records: Path) -> str:
 
 
 def exit_code(results: list[Result]) -> int:
-    return 1 if any(result.surprise for result in results) else 0
+    """Zero unless a case, or a group that has a threshold, came out other than declared."""
+    if any(result.surprise for result in results):
+        return 1
+    for name, group in GROUPS.items():
+        if group.least is None:
+            continue
+        members = [result for result in results if result.case.group == name]
+        if sum(result.passed for result in members) < group.least:
+            return 1
+    return 0
 
 
 async def main(argv: list[str]) -> int:
