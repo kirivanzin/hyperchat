@@ -82,6 +82,12 @@ resource "github_branch_protection" "default" {
   # from the fork — the opposite of what it is there to protect. The gate that protects `main` is the
   # one that runs everywhere.
   required_status_checks {
+    # `strict = false`, which is a decision rather than a default: a branch that is behind `main` may
+    # merge on a check that ran against its own base, instead of being required to be up to date
+    # first. With one contributor and a serial merge order that costs nothing, and the review
+    # invariant already requires the merged object to be the reviewed one — which a forced rebase
+    # breaks. Turn it on the day two people merge concurrently and the base a check ran against stops
+    # being the base that merges.
     strict   = false
     contexts = ["ci"]
   }
