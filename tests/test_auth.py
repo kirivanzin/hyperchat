@@ -32,9 +32,10 @@ from hyperchat.auth import (
     UpstreamError,
     verify_token,
 )
-from hyperchat.config import settings
+from hyperchat.config import load_settings
 from hyperchat.main import api, protected, require_caller
 
+settings = load_settings()
 AUDIENCE = settings.expected_audience
 ALLOWED = min(settings.allowed_subs)
 

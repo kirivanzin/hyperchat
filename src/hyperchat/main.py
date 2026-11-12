@@ -8,18 +8,53 @@ healthy-looking process nobody can use.
 `/` stays open. It returns a constant and spends nothing. Everything under `/api` is behind the trust
 boundary, and the dependency that enforces it sits on the router rather than on the routes, so adding
 a route there is the only step required to protect it.
+
+`/api/chat` is the only route that spends money, so it is the only one with two ways to be unavailable:
+503 when no provider key is configured, 502 when the provider itself fails.
 """
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from langchain_core.messages import HumanMessage
+from pydantic import BaseModel, Field
 
+from hyperchat.agent import NotConfigured, ProviderFailed, close_model, get_model, graph
 from hyperchat.auth import AuthError, Caller, NotAllowedError, UpstreamError, verify_token
-from hyperchat.config import settings
+from hyperchat.config import load_settings
 
-api = FastAPI(title="hyperchat")
+# Read here, not in `config`, so that importing the graph does not require an allowlist: `make chat`
+# and `langgraph dev` are tools, and a tool that needs the production trust boundary configured is a
+# tool nobody runs. The service still refuses to start without it, because this line runs on import.
+settings = load_settings()
+
+logger = logging.getLogger("hyperchat")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """The provider client lives as long as the process: built here, closed on shutdown.
+
+    Building it at startup rather than on the first request means a bad key is a log line at boot
+    instead of a slow first call. It does not fail the boot: an unset key is "the model is off", and
+    `/api/chat` says 503 when it is.
+    """
+    try:
+        get_model()
+    except NotConfigured:
+        # A warning rather than info, because uvicorn's default logging does not show info from this
+        # logger: an operator would see nothing at boot and discover it from a 503. It is not an
+        # error -- a deployment without a key is a deployment with the model turned off.
+        logger.warning("provider key is unset: /api/chat will answer 503")
+    yield
+    await close_model()
+
+
+api = FastAPI(title="hyperchat", lifespan=lifespan)
 
 
 @api.get("/")
@@ -68,3 +103,30 @@ api.include_router(protected)
 @protected.get("/me")
 def me(caller: Annotated[Caller, Depends(require_caller)]) -> dict[str, str | None]:
     return {"sub": caller.sub, "email": caller.email}
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+@protected.post("/chat")
+async def chat(
+    body: ChatRequest, caller: Annotated[Caller, Depends(require_caller)]
+) -> dict[str, str]:
+    """One message through the graph. The subject is what makes the spend attributable to a person."""
+    try:
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(body.message)]},
+            {"metadata": {"sub": caller.sub}},
+        )
+    except NotConfigured as exc:
+        # The feature is off, not broken. 503 says "not now", which is true and not the caller's fault.
+        raise HTTPException(status_code=503, detail="the model is not configured") from exc
+    except ProviderFailed as exc:
+        # The reason is logged and the caller gets a sentence with nothing in it. The prompt is not
+        # in either: it is the caller's content and it is not ours to keep.
+        logger.error("provider call failed: %s", exc)
+        raise HTTPException(status_code=502, detail="the model provider failed") from exc
+
+    reply = result["messages"][-1].content
+    return {"reply": reply if isinstance(reply, str) else str(reply)}
