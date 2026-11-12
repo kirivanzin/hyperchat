@@ -1,0 +1,24 @@
+# The mechanism that moves the pins. Without it, `Dockerfile`'s digests and `uv.lock` freeze on the
+# day they were written, and a pinned repository silently ages instead of being argued about.
+#
+# Weekly, not daily: this repository changes when someone changes it, and a daily pull request that
+# is merged weekly is a daily notification that teaches you to ignore notifications.
+#
+# Grouped, one pull request per ecosystem, so the alternative to merging eight is not merging none.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      containers:
+        patterns: ["*"]

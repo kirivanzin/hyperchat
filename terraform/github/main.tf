@@ -58,6 +58,14 @@ resource "github_repository" "repo" {
   }
 }
 
+# Reported alerts, and something that acts on them. The switch lives here rather than in
+# `security_and_analysis`, which has six children and this is not one of them: the setting belongs
+# where the other settings are, or it belongs to whoever remembers clicking it.
+resource "github_repository_dependabot_security_updates" "repo" {
+  repository = github_repository.repo.name
+  enabled    = true
+}
+
 resource "github_branch_protection" "default" {
   repository_id = github_repository.repo.node_id
   pattern       = var.default_branch
