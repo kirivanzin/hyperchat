@@ -45,7 +45,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 .DEFAULT_GOAL := help
 
 .PHONY: help info lint test build dev run stop token chat github github-plan github-create github-remote \
-        github-apply github-status registry-plan registry-apply login push \
+        github-apply github-status pipeline-audit registry-plan registry-apply login push \
         registry-status registry-verify image-exists image-digest deploy-plan deploy smoke
 
 help: ## Show this help
@@ -298,6 +298,9 @@ deploy: ## Deploy this commit's image, secret version and service to Cloud Run i
 			exit 1; }; \
 		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false $(BACKEND); \
 		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) apply -input=false $(AUTO_APPROVE) -var="project=$(PROJECT)" -var="image=$(REMOTE)"
+
+pipeline-audit: ## Check the live pipeline against what the README claims (needs gh; owner for protection)
+	@REPO=$(FULL_NAME) scripts/pipeline-audit.sh
 
 smoke: ## Assert the deployed probes and both auth directions (needs gcloud for a token)
 	@[ -n "$(APP_URL)" ] || { \
