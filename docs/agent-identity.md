@@ -16,7 +16,7 @@ was needed anyway.
 | Enabling 2FA | **you** | Required for any account that pushes code, and recovery codes are a credential. |
 | The SSH key | **you** | Registering it needs the account's own token, which is circular. |
 | The access token | **you** | No PAT resource exists in any provider, and no PAT API. |
-| Access to this repository | **Nothing**, deliberately | There is no collaborator resource, so nothing drifts — and equally, nothing would notice one added by hand. A status check is the only way to know. |
+| Access to this repository | **Nothing**, deliberately | There is no collaborator resource, so nothing drifts — and equally, nothing would notice one added by hand. `make github-status` is how you find out: it names outside collaborators by role and pending invitations by id. |
 
 Everything below marked *you* is out of band, once. Everything else is `make github-apply`.
 
@@ -238,7 +238,11 @@ the fork.
 gh api /orgs/saxeum --jq .plan.filled_seats
 ```
 
-prints `1`. The account is neither a member nor a collaborator, so it consumes nothing.
+prints `null` with this token, so the seat count is a field the owner reads, and `make github-status`
+is where it appears. Which of two reasons makes it unreadable is not something this measurement
+separates: the account is not a member, and the `repo`-only scope from step 6 leaves `gh auth status`
+reporting `Missing required token scopes: 'read:org'`. The account being neither a member nor a
+collaborator is what the two lines above it in that output are for.
 
 And the thing the experiment is actually about — a comment on a pull request, from an account that is
 not its author. Anyone can comment on a public repository, so this needs no permission at all:
