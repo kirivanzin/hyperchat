@@ -56,8 +56,19 @@ build: ## Build the image for this commit, pulling the base image
 # start without the two values in it, so a missing value is a crash at import rather than something a
 # file quietly supplied. `set -a` exports every assignment; the `-f` guard means an absent .env is the
 # application's error, naming the value it wanted, instead of the shell's.
+# The environment both local targets need, in one place so the two cannot drift: `.env` for the
+# audience and the allowlist, and the provider key from a file *outside* the checkout.
+#
+# The key is not in `.env`, and not because it would be committed there — `.env` is git-ignored. It is
+# because a checkout gets copied, archived, cleaned and indexed by tools that were never asked to keep
+# a secret, and the rule that says so is easier to keep when it has no exception. `make dev` put a
+# credential in a checkout the first time it was used, which is what this line exists to stop.
+LOCAL_ENV = set -a; [ -f .env ] && . ./.env; set +a; \
+            if [ -z "$$PROVIDER_API_KEY" ] && [ -f "$$HOME/.config/hyperchat/agent-deepseek.token" ]; then \
+              PROVIDER_API_KEY=$$(cat "$$HOME/.config/hyperchat/agent-deepseek.token"); export PROVIDER_API_KEY; fi
+
 dev: ## Run the app from the source tree on PORT, reading .env; no image
-	@set -a; [ -f .env ] && . ./.env; set +a; uv run uvicorn hyperchat.main:api --host 127.0.0.1 --port $(PORT)
+	@$(LOCAL_ENV); uv run uvicorn hyperchat.main:api --host 127.0.0.1 --port $(PORT)
 
 run: ## Run the image on PORT, with .env passed in so the fail-closed config is satisfied
 	docker run --rm --name $(IMAGE) --env-file .env -p $(PORT):8080 $(LOCAL)
@@ -72,8 +83,8 @@ token: ## Print a Google ID token for EXPECTED_AUDIENCE (needs gcloud, logged in
 # `$$MESSAGE` is deliberate: make turns `$$` into `$`, leaving the shell to expand `$MESSAGE` at run
 # time. `$(MESSAGE)` would have make expand the value first, so `$HOME` or `$5` inside the message
 # would be eaten before Python saw it. MESSAGE belongs in the environment, not in make's arguments.
-chat: ## One message from MESSAGE in the environment through the graph (reads .env; needs PROVIDER_API_KEY)
-	@set -a; [ -f .env ] && . ./.env; set +a; uv run python -m hyperchat.chat "$$MESSAGE"
+chat: ## One message from MESSAGE in the environment through the graph (reads .env, and the key from outside it)
+	@$(LOCAL_ENV); uv run python -m hyperchat.chat "$$MESSAGE"
 
 stop: ## Stop the running container
 	@docker stop $(IMAGE) 2>/dev/null || true

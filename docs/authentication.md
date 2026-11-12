@@ -62,6 +62,20 @@ The allowlist is keyed on the token's `sub`. A subject survives a rename and is 
 email-keyed list silently hands access to whoever takes the address next. The `email` claim is
 returned from `/api/me` for display and is never compared to decide anything.
 
+## Where the key goes locally
+
+`make dev` and `make chat` read two things from different places, and the split is the rule:
+
+- **`.env`** holds `EXPECTED_AUDIENCE` and `ALLOWED_SUBS`. Not credentials: an audience is a public client
+  id, and a subject is an identifier the service already logs.
+- **the provider key** is read from `~/.config/hyperchat/agent-deepseek.token` — mode 600, outside every
+  checkout — unless `PROVIDER_API_KEY` is already set in the environment.
+
+The reason is not that `.env` would be committed; it is git-ignored. It is that a checkout gets copied,
+cleaned, archived and indexed by tools that were never asked to keep a secret, and a rule with one
+exception is a rule that gets forgotten. The container mounts that same file, so the mechanism is
+identical in both places.
+
 ## Config refuses to start
 
 `EXPECTED_AUDIENCE` and `ALLOWED_SUBS` are read at import and have no defaults. A process that boots
