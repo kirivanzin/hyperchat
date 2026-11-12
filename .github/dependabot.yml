@@ -22,3 +22,16 @@ updates:
     groups:
       containers:
         patterns: ["*"]
+    ignore:
+      # The interpreter is not a base-image refresh. `3.13` -> `3.15` is a *minor* update by semver —
+      # the major stays 3 — and taking it moves the runtime out from under every other pin:
+      # `.python-version`, `ci.yml` and `requires-python` all say 3.13, so the image would run an
+      # interpreter the suite has never been run on. It also breaks dependencies with no wheel for
+      # the new ABI: `zstandard==0.25.0` ships 17 cp313 wheels and none for cp315, so the build falls
+      # back to a source tree and then looks for `gcc`, which slim deliberately does not carry (#47).
+      #
+      # Digest updates to the `3.13` tag are not version updates and are not ignored: that is the
+      # security path, and it is how this base image gets its Debian and CPython rebuilds without a
+      # runtime change. Moving the interpreter is a decision that moves all four pins in one commit.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
