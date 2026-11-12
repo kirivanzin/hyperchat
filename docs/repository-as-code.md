@@ -118,8 +118,10 @@ must be. The bucket itself is owned by the sibling project's bootstrap root
 (`saxeum/helpdesk-infra`, `terraform/bootstrap/main.tf`, `google_storage_bucket.tfstate`): versioning
 on, a lifecycle rule keeping 20 noncurrent generations, `prevent_destroy`. This repository takes a
 prefix and does not create or manage it — a second owner of a bucket that already has one is the
-duplication this repository keeps refusing, and the argument that keeps `google_project_service` out
-of a bootstrap root (#38) applies in reverse here. A project without that bucket fails honestly:
+duplication this repository keeps refusing, and the state it holds is recoverable only because that
+root says so. (The three `google_project_service` resources are the opposite case, and that is a
+deliberate exception: they are duplicated on purpose so a new project has an owner inside this
+repository. The next section says why.) A project without that bucket fails honestly:
 `make deploy` stops with `storage: bucket doesn't exist`, so the first step of a new deployment is
 that root, applied once by hand.
 

@@ -147,7 +147,6 @@ resource "google_secret_manager_secret" "provider_key" {
   replication {
     auto {}
   }
-
 }
 
 resource "google_secret_manager_secret_version" "provider_key" {
