@@ -116,13 +116,22 @@ gh workflow run deploy.yml \
 bucket. The allowlist is the deployed one: `.env`'s includes the agent so it can test, and that
 subject must not be deployed.
 
-The job authenticates as `hyperchat-deployer` through Workload Identity — the provider refuses any
-repository but this one and any ref but `refs/heads/main` — and, when this commit's image is not
-already in the registry, builds and pushes it (`make image-exists` decides; a tag that exists is a
-commit whose image exists, and the registry's immutability means it must never be pushed twice),
+The job authenticates as `hyperchat-deployer` through Workload Identity. The provider refuses anything
+but this repository, this ref, this workflow file and this event — `workflow_ref` is what stops a new
+workflow on `main` from inheriting the identity, `pull_request_target` included — and, when this
+commit's image is not already in the registry, builds and pushes it (`make image-exists` decides; a
+tag that exists is a commit whose image exists, and the registry's immutability means it must never be
+pushed twice),
 runs `make deploy` with the provider key read from Secret Manager into that step's environment, then
 asserts `/livez` is `200` and `/api/me` without a token is `401`. `make smoke` stays a human step
 because it mints a token from a user login, which this identity cannot do.
+
+The allowlist arrives as a dispatch input, which means GitHub prints it once in the header of the
+step that receives it, before `::add-mask::` covers every line after. GitHub prints each step's
+environment and this repository is public, so the fix is an environment secret; that is #43's phase A,
+and this is the most that can be done while the value arrives as an input. Two dispatches cannot run
+at once — `concurrency` is `deploy-hyperchat`, not cancelling — because they would contend on the
+Terraform state lock, and the digest of the image each run deploys is in its log either way.
 
 The identity itself is `terraform/registry/identity.tf`, applied once with `make registry-apply`. The
 workflow can never create or widen it.
