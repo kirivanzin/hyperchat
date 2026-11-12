@@ -98,21 +98,36 @@ writes them. `docs/repository-as-code.md` records that split and what it costs. 
 shows the change, and `make registry-verify` shows the image the service is running beside the
 registry digest for the current tag.
 
-## Deploying on a merge
+## Deploying through the pipeline, by hand
 
-`.github/workflows/deploy.yml` runs after the `ci` workflow succeeds on `main`: it authenticates
-through the OIDC deployer created for #43, builds and pushes the image for the tested commit, then
-runs `make deploy`. It requires two repository variables, `PROJECT` and `ALLOWED_SUBS`; the provider
-key is read from Secret Manager into the apply's environment and never written to state.
-`WIF_PROVIDER` is optional when the provider path needs the project number rather than the project
-id. The deployer identity and its five grants are the out-of-band runbook in #43; this workflow does
-not create or broaden them. `make smoke` stays a human step because it needs a token minted by a
-user, not by the deployer.
+`.github/workflows/deploy.yml` is **dispatch-only**, and that is the current shape rather than a
+first draft. A runner has no `.env` — it is git-ignored and not in the tree — and this repository
+keeps the project id and the deployed allowlist out of stored configuration, so the three values are
+typed at dispatch time and nothing is kept but the run's own metadata:
 
-The same workflow has a pull-request job that attempts the same authentication and expects the
-Workload Identity provider to refuse it, because its condition requires both
-`assertion.repository == "saxeum/hyperchat"` and `assertion.ref == "refs/heads/main"`. If that job ever
-succeeds, it fails instead of treating the provider condition as documentation.
+```sh
+gh workflow run deploy.yml \
+  -f project=<project> \
+  -f allowed_subs=<the deployed allowlist, not the one in .env> \
+  -f wif_provider="$(terraform -chdir=terraform/registry output -raw deployer_provider)"
+```
+
+`<project>` is the id in `terraform/registry/terraform.tfvars`; `<project>-tfstate` is the state
+bucket. The allowlist is the deployed one: `.env`'s includes the agent so it can test, and that
+subject must not be deployed.
+
+The job authenticates as `hyperchat-deployer` through Workload Identity — the provider refuses any
+repository but this one and any ref but `refs/heads/main` — builds and pushes this commit's image,
+runs `make deploy` with the provider key read from Secret Manager into that step's environment, then
+asserts `/livez` is `200` and `/api/me` without a token is `401`. `make smoke` stays a human step
+because it mints a token from a user login, which this identity cannot do.
+
+The identity itself is `terraform/registry/identity.tf`, applied once with `make registry-apply`. The
+workflow can never create or widen it.
+
+When the values have a home a runner can read — an `environment` is the option on #43 — the workflow
+gains `workflow_run` on `ci` for `main`, and the pull-request job that asserts a non-main ref cannot
+authenticate. Neither can be written honestly before that, so neither is here.
 
 ## Calling it as a human
 
