@@ -80,6 +80,7 @@ from hyperchat.agent import (
     NotConfigured,
     ProviderFailed,
     StepLimitExceeded,
+    TruncatedToolCall,
     close_model,
 )
 from hyperchat.agent import run as run_graph
@@ -434,7 +435,10 @@ async def ask(case: Case) -> Reply:
                 raised=type(stopped).__name__,
                 latency_ms=round((time.perf_counter() - started) * 1000),
             )
-        except EmptyReply as empty:
+        except (EmptyReply, TruncatedToolCall) as empty:
+            # An empty reply and a tool call the cap cut in half are both *case* results: the provider
+            # answered, and what came back cannot be used. Recorded against the case, with the reason
+            # in `raised`, rather than aborting the run on a message about the payload.
             # An empty reply is a *case* result, not a transport failure: the provider answered and
             # the answer was nothing. The case fails and the run says which, rather than stopping at
             # the first — which is what a deliberately small cap looks like from here, and the
