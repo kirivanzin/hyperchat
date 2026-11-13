@@ -7,7 +7,9 @@ cannot say what a moved score moved because of.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 from hyperchat import configuration
@@ -82,11 +84,12 @@ def test_the_hash_orders_the_same_values_the_same_way():
 
 def test_the_eval_writes_the_block_before_it_asks_the_provider(monkeypatch):
     """`make eval | head -1` is the configuration: a run that dies early still says how it was set up."""
+    # The interpreter running the suite, not `uv`: the harness is importable from it in both the
+    # checkout and CI, and a stripped PATH is how this test first failed in CI with "No such file or
+    # directory: 'uv'".
     done = subprocess.run(
         [
-            "uv",
-            "run",
-            "python",
+            sys.executable,
             "scripts/eval.py",
             "--cases",
             "/dev/null",
@@ -97,11 +100,7 @@ def test_the_eval_writes_the_block_before_it_asks_the_provider(monkeypatch):
         capture_output=True,
         text=True,
         check=False,
-        env={
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
-            "HOME": str(Path.home()),
-            "PROVIDER_MAX_TOKENS": "640",
-        },
+        env={**os.environ, "PROVIDER_MAX_TOKENS": "640"},
     )
     first = done.stdout.splitlines()[0] if done.stdout else ""
 
