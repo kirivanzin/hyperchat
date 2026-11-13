@@ -154,6 +154,32 @@ def test_the_prompt_reaches_the_model_unchanged(caller, monkeypatch):
     assert seen[0]["messages"][-1] == {"content": "say ok", "role": "user"}
 
 
+def test_a_tool_call_cut_in_half_is_named_rather_than_sent_back(monkeypatch):
+    """The cap can end a turn mid-call; the next request would be one the provider refuses with a 400.
+
+    Measured before it was fixed: `PROVIDER_MAX_TOKENS=128` made `p4-json-array` fail 3 times out of 3
+    with `400 An assistant message with 'tool_calls' must be followed by ...` — a sentence about the
+    payload for a cause in our configuration.
+    """
+
+    class Truncating(Binds):
+        async def ainvoke(self, *_args: object, **_kwargs: object) -> AIMessage:
+            return AIMessage(
+                content="",
+                tool_calls=[],
+                invalid_tool_calls=[{"name": "read_document", "args": '{"name": "REA', "id": "x"}],
+                response_metadata={"finish_reason": "length"},
+            )
+
+    monkeypatch.setattr(agent, "_model", Truncating())
+
+    async def node():
+        return await agent.call_model({"messages": [HumanMessage("hi")]}, {})
+
+    with pytest.raises(agent.TruncatedToolCall, match="cut mid tool call"):
+        asyncio.run(node())
+
+
 # --- the contract, on the wire -------------------------------------------------------------------
 
 

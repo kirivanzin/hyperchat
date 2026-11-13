@@ -26,6 +26,13 @@ returning an empty string, because a 200 with no text is indistinguishable from 
 
 ## Bounds
 
+A cap small enough to end a turn mid tool call fails as `TruncatedToolCall` rather than as a provider
+400: the next request would carry an assistant message with tool calls and nothing satisfying them, and
+the provider's rejection names the payload rather than the cause. Measured at 128 tokens — the
+`p4-json-array` question failed that way three times out of three — and 224 was clean, so the boundary
+is real but not a single number: it moves with however much the model says before it calls the tool.
+That is why there is no validated floor here; there is a named failure instead.
+
 `PROVIDER_MAX_TOKENS` (default 640) goes on the wire as `max_tokens` — not `max_completion_tokens`,
 which DeepSeek ignores, and a cap that is silently not applied looks exactly like one that is. It is
 the only bound this repository sets on the output. 640 rather than a sentence-sized 256 because a
@@ -111,6 +118,7 @@ looks like a code defect: `AGENT_MAX_STEPS=0` and an `AGENT_BUDGET_SECONDS` shor
 | `NotConfigured` | no provider key — the feature is off, not broken | `503` |
 | `ProviderFailed` | the provider failed, including its own timeout; logged, never returned | `502` |
 | `EmptyReply` | the provider answered with no usable text (a `ProviderFailed` subclass) | `502` |
+| `TruncatedToolCall` | the cap ended the turn mid tool call (a `ProviderFailed` subclass) | `502` |
 | `StepLimitExceeded` | the graph took more than `AGENT_MAX_STEPS` super-steps | `504` |
 | `BudgetExceeded` | the run outlived `AGENT_BUDGET_SECONDS` | `504` |
 

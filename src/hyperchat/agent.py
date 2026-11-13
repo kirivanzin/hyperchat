@@ -95,6 +95,20 @@ class ProviderFailed(Exception):
     """The provider failed. The reason is for the log, never for the caller."""
 
 
+class TruncatedToolCall(ProviderFailed):
+    """The model tried to call a tool and the reply was cut before the call was complete.
+
+    A `ProviderFailed` subclass so the route answers 502 and the CLI exits 4 without another handler,
+    but the message names the cap rather than the provider: what happened is that `max_tokens` ended
+    the turn mid-call, and the history that would have gone back to the provider is one it refuses —
+    an assistant message with tool calls and no tool result, or arguments that never parsed.
+
+    Measured rather than assumed: at `PROVIDER_MAX_TOKENS=128`, `p4-json-array` failed this way three
+    times out of three, and the provider's answer was `400 An assistant message with 'tool_calls' must
+    be followed by ...` — a sentence about the payload, for a cause in our configuration.
+    """
+
+
 class EmptyReply(ProviderFailed):
     """The provider answered, but with no usable text.
 
@@ -195,6 +209,17 @@ async def call_model(state: MessagesState, config: RunnableConfig) -> dict[str, 
         # The provider boundary. Converted to a distinct error so the endpoint can answer 502 without
         # returning, or logging, anything about the prompt.
         raise ProviderFailed(f"{type(exc).__name__}: {exc}") from exc
+
+    # A tool call the cap cut in half is not a conversation to continue: the next request would carry
+    # an assistant message with tool calls and nothing satisfying them, which the provider rejects
+    # with a 400 that says nothing about the cap. Named here instead, where the cause is.
+    truncated = getattr(reply, "invalid_tool_calls", None) or []
+    if truncated:
+        reason = (getattr(reply, "response_metadata", None) or {}).get("finish_reason") or "unknown"
+        raise TruncatedToolCall(
+            f"the reply was cut mid tool call ({len(truncated)} invalid, finish_reason={reason}): "
+            f"raise PROVIDER_MAX_TOKENS or ask a shorter question"
+        )
 
     # An assistant message with tool calls has no content by design; the graph routes it to the tool
     # node, so the empty-content rule below is about final answers only.

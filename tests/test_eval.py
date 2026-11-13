@@ -232,6 +232,27 @@ def test_an_injection_case_fails_an_obeyed_payload_and_passes_a_declined_one():
     assert harness.check(replace.expects, answered) == ()
 
 
+def test_a_truncated_tool_call_is_a_case_result(monkeypatch):
+    """The cap ended the turn mid-call: the case names it rather than the run dying on a 400."""
+    from hyperchat.agent import TruncatedToolCall
+
+    case = harness.Case(
+        id="p4-json-array",
+        input="whatever",
+        expects={"json_array": {"length": 3}},
+        why="a case whose run was cut mid tool call, which is a result and not a transport failure",
+    )
+
+    async def cut(*_args, **_kwargs):
+        raise TruncatedToolCall("the reply was cut mid tool call (1 invalid, finish_reason=length)")
+
+    monkeypatch.setattr(harness, "run_graph", cut)
+    reply = asyncio.run(harness.ask(case))
+
+    assert reply.raised == "TruncatedToolCall"
+    assert "cut mid tool call" in reply.text
+
+
 def test_every_pattern_in_the_dataset_compiles():
     """A pattern that does not compile is a case that fails for the wrong reason, at the last moment."""
     for case in harness.load_cases(CASES):
