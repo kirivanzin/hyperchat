@@ -77,13 +77,13 @@ def resolved() -> Configuration:
     )
 
 
-def line(prefix: str, **extra: Any) -> str:
+def line(prefix: str, block: Configuration | None = None, **extra: Any) -> str:
     """`<prefix> config model=… … config_sha256=…`, with any run-specific keys after the nine.
 
     One format for the service and the harness, so one `grep` answers "what is running" and "what did
     this score measure" — and `parse` reads either.
     """
-    block = resolved()
+    block = block or resolved()
     parts = [f"{prefix} config", block.attributes(), f"config_sha256={block.sha256()}"]
     parts += [f"{name}={value}" for name, value in extra.items()]
     return " ".join(parts)

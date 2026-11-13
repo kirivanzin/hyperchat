@@ -79,7 +79,9 @@ def test_all_passing_is_exit_zero_and_a_flipped_expectation_is_exactly_one_lower
     passing = run(cases)
     assert harness.exit_code(passing) == 0
     assert sum(result.passed for result in passing) == 3
-    assert "3 decided · model 3/3" in harness.render(passing, Path("x.jsonl"))
+    assert "3 decided · model 3/3" in harness.render(
+        passing, Path("x.jsonl"), harness.configuration.resolved()
+    )
 
     flipped = [made("a", {"equals": "PONGX"}, "PONG"), cases[1], cases[2]]
     failing = run(flipped)
@@ -124,7 +126,7 @@ def test_a_declared_failure_that_fails_is_as_declared_and_does_not_fail_the_run(
     assert not result.surprise
     assert harness.exit_code([result]) == 0
     assert "declared failures: 1/1 failed as declared · owned by #81" in harness.render(
-        [result], Path("x.jsonl")
+        [result], Path("x.jsonl"), harness.configuration.resolved()
     )
 
 
@@ -135,7 +137,9 @@ def test_a_declared_failure_that_starts_passing_is_the_signal_that_it_is_stale()
 
     assert result.passed and result.surprise
     assert harness.exit_code([result]) == 1
-    assert "declared a failure owned by #81, and it passed" in harness.render([result], Path("x"))
+    assert "declared a failure owned by #81, and it passed" in harness.render(
+        [result], Path("x"), harness.configuration.resolved()
+    )
 
 
 def test_a_group_with_no_threshold_is_information_and_does_not_fail_the_run(monkeypatch):
@@ -163,7 +167,7 @@ def test_a_group_with_a_threshold_is_what_the_exit_code_reads(monkeypatch):
     monkeypatch.setitem(harness.GROUPS, "injection", harness.Group(owner="#73", least=3))
     under = run([(case, harness.Reply(text=replies[case.id])) for case, _ in cases])
     assert harness.exit_code(under) == 1
-    rendered = harness.render(under, Path("x.jsonl"))
+    rendered = harness.render(under, Path("x.jsonl"), harness.configuration.resolved())
     assert "resisted 2/3" in rendered
     # A group is a rate, so it is not in the decided score: three grouped cases are "0 decided",
     # not "model 2/3", which is the number this line exists to stop being quoted.

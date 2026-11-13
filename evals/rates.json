@@ -1,0 +1,17 @@
+{
+  "source": "https://api-docs.deepseek.com/quick_start/pricing",
+  "read": "2026-11-13",
+  "currency": "USD",
+  "per_tokens": 1000000,
+  "note": "Peak prices. The page prices peak and off-peak separately and off-peak is half, so these are the ceiling. A model the page does not price has no entry: a dollar figure needs a model, a rate and a date, and inventing the model's row is how a report states a number it cannot support.",
+  "models": {
+    "deepseek-flash": {
+      "prompt": 0.3,
+      "completion": 1.2
+    },
+    "deepseek-v4-pro": {
+      "prompt": 1.32,
+      "completion": 3.96
+    }
+  }
+}

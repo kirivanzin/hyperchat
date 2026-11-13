@@ -48,7 +48,7 @@ REMOTE   = $(REGISTRY)/$(IMAGE):$(TAG)
 .DEFAULT_GOAL := help
 
 .PHONY: help info lint test eval build dev run stop token chat github github-plan github-create github-remote \
-        github-apply github-status pipeline-audit registry-plan registry-apply login push limits \
+        github-apply github-status pipeline-audit registry-plan registry-apply login push limits report \
         registry-status registry-verify image-exists image-digest deploy-plan deploy smoke
 
 help: ## Show this help
@@ -75,6 +75,9 @@ limits: ## Assert the per-caller rate limit: LIMIT requests allowed, the next tw
 		echo "run 'make deploy' once, or pass APP_URL=<url>" >&2; \
 		exit 1; }
 	@$(LOCAL_ENV); scripts/limits.sh "$(APP_URL)" "$(LIMIT)"
+
+report: ## Run the eval and write docs/eval-report.md and the README line from it
+	@$(LOCAL_ENV); uv run python scripts/eval.py --report docs/eval-report.md
 
 eval: ## Every case in the dataset through the graph, beside a baseline that is not a model
 	@$(LOCAL_ENV); uv run python scripts/eval.py

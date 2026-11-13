@@ -59,8 +59,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import re
+import subprocess
 import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable, Iterator
@@ -71,7 +73,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from hyperchat import configuration
+from hyperchat import configuration, corpus
 from hyperchat.agent import (
     BudgetExceeded,
     EmptyReply,
@@ -85,6 +87,7 @@ from hyperchat.agent import run as run_graph
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / "evals" / "cases.jsonl"
 RECORDS = ROOT / "evals" / "results.jsonl"
+RATES = ROOT / "evals" / "rates.json"
 
 # `config.py`'s default, and `PROVIDER_MAX_TOKENS` still wins when it is set: a per-run override is
 # what an operator asks for, and the run says so in its first line rather than hiding it. A retrieval
@@ -480,6 +483,73 @@ def overrides(cases: list[Case]) -> str:
     return ",".join(parts)
 
 
+# --- what it cost, and how slow it was ----------------------------------------------------------
+
+
+def load_rates(path: Path = RATES) -> dict[str, Any]:
+    """The rate table, read from the repository rather than remembered.
+
+    A price is an external fact with a date on it. `models` holds only what the page actually priced:
+    a model with no row is reported as tokens, never as a number derived from a neighbouring row.
+    """
+    return json.loads(path.read_text())
+
+
+def tokens(results: list[Result]) -> dict[str, int]:
+    """Prompt, completion and total over the cases that carry counts. Decided cases only."""
+    decided = [result for result in results if result.case.group is None]
+    prompt = sum(result.reply.prompt_tokens or 0 for result in decided)
+    completion = sum(result.reply.completion_tokens or 0 for result in decided)
+    return {"prompt": prompt, "completion": completion, "total": prompt + completion}
+
+
+def percentile(values: list[int], fraction: float) -> int:
+    """Nearest-rank, not interpolated: with twenty values, "the 95th" is one of them."""
+    if not values:
+        return 0
+    ordered = sorted(values)
+    rank = max(1, math.ceil(fraction * len(ordered)))
+    return ordered[rank - 1]
+
+
+def cost(totals: dict[str, int], block: configuration.Configuration, table: dict[str, Any]) -> str:
+    """A dollar figure with its rate and date, or tokens only — never a figure without both."""
+    read = table.get("read", "unknown date")
+    row = table.get("models", {}).get(block.model)
+    if row is None:
+        priced = ", ".join(sorted(table.get("models", {}))) or "nothing"
+        return (
+            f"no rate on file for {block.model} ({RATES.relative_to(ROOT)}, read {read}; "
+            f"it prices {priced}): tokens only"
+        )
+    per = table.get("per_tokens", 1_000_000)
+    spent = (totals["prompt"] * row["prompt"] + totals["completion"] * row["completion"]) / per
+    return (
+        f"{table.get('currency', 'USD')} {spent:.4f} at {block.model} rates read {read} "
+        f"(peak; the page prices off-peak at half)"
+    )
+
+
+def aggregates(results: list[Result], block: configuration.Configuration) -> list[str]:
+    """The three lines that answer "what did it cost" and "how slow is it"."""
+    decided = [result for result in results if result.case.group is None]
+    totals = tokens(results)
+    latencies = [result.reply.latency_ms for result in decided]
+    mean = round(totals["total"] / len(decided)) if decided else 0
+    return [
+        (
+            f"tokens: prompt {totals['prompt']:,} · completion {totals['completion']:,} · "
+            f"total {totals['total']:,} · mean {mean:,}/case"
+        ),
+        (
+            f"latency: p50 {percentile(latencies, 0.50)} ms · "
+            f"p95 {percentile(latencies, 0.95)} ms (this machine and network, one run, "
+            f"first case included)"
+        ),
+        f"cost: {cost(totals, block, load_rates())}",
+    ]
+
+
 def write_records(results: list[Result], path: Path, block: configuration.Configuration) -> None:
     """One JSONL record per case, with the fields a later comparison can use across runs.
 
@@ -507,7 +577,7 @@ def write_records(results: list[Result], path: Path, block: configuration.Config
             )
 
 
-def render(results: list[Result], records: Path) -> str:
+def render(results: list[Result], records: Path, block: configuration.Configuration) -> str:
     """The whole run on one screen: twenty rows, then the numbers this ticket exists for."""
     # Whether each strategy won each case, computed once from the case and the input alone.
     won = {
@@ -573,7 +643,8 @@ def render(results: list[Result], records: Path) -> str:
             if not result.passed:
                 lines.append(f"  not resisted: {result.case.id}")
                 lines.append(f"    reply: {result.reply.text.strip()[:200]!r}")
-    declared = [result for result in results if result.case.known_failure is not None]
+    lines.extend(aggregates(results, block))
+    declared = [result for result in results if result.case.known_failure]
     if declared:
         owners = sorted({result.case.known_failure for result in declared})
         failed = sum(not result.passed for result in declared)
@@ -598,6 +669,125 @@ def render(results: list[Result], records: Path) -> str:
     return "\n".join(lines)
 
 
+HONESTY = (
+    "{count} decided cases is a baseline, not a benchmark: it says a change did not make things "
+    "worse, and says nothing about performance on questions nobody wrote down."
+)
+README_MARK = corpus.GENERATED[0]
+
+
+def report_markdown(
+    results: list[Result], block: configuration.Configuration, notes: list[str]
+) -> str:
+    """The whole run as a committed page: scores, cost, latency, the block, and how old it is."""
+    import platform
+    from datetime import UTC, datetime
+
+    decided = [result for result in results if result.case.group is None]
+    passed = sum(result.passed for result in decided)
+    resisted = {
+        name: sum(result.passed for result in results if result.case.group == name)
+        for name in GROUPS
+    }
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    lines = [
+        "# Eval report",
+        "",
+        (
+            f"Generated by `make report` at {now}, at commit `{sha}`. Do not edit: the generator "
+            "is the only writer, and the three hashes below are what say whether this page still "
+            "describes the code."
+        ),
+        "",
+        "## Configuration",
+        "",
+        "```",
+        configuration.line("eval", block),
+        "```",
+        "",
+        "## Scores",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| decided | **{passed}/{len(decided)}** |",
+        *[
+            f"| constant baseline | {sum(not check(r.case.expects, baseline_reply(r.case, s)) for r in decided)}/{len(decided)} |"
+            for s in [BASELINES["constant"]]
+        ],
+        *[
+            f"| {name} | **{count}/{sum(1 for r in results if r.case.group == name)}** "
+            f"(floor {GROUPS[name].least}) |"
+            for name, count in resisted.items()
+        ],
+        "",
+        "## Cost and latency",
+        "",
+        *[f"- {line}" for line in notes],
+        "",
+        "## Environment",
+        "",
+        f"- machine: {platform.system()} {platform.machine()}, Python {platform.python_version()}",
+        "- checkout: this one, warm; the first case is included in the percentiles",
+        "- one run, on the machine that generated this page: another machine is another number",
+        "",
+        f"> {HONESTY.format(count=len(decided))}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def readme_line(results: list[Result], notes: list[str], sha: str) -> str:
+    """One line for a skimming reader: numbers, a SHA, and a link. No adjectives."""
+    decided = [result for result in results if result.case.group is None]
+    passed = sum(result.passed for result in decided)
+    latencies = [result.reply.latency_ms for result in decided]
+    totals = tokens(results)
+    resisted = sum(result.passed for result in results if result.case.group == "injection")
+    members = sum(1 for result in results if result.case.group == "injection")
+    floor = GROUPS["injection"].least
+    thousands = round(totals["total"] / 1000)
+    return (
+        f"{README_MARK} {passed}/{len(decided)} decided · injection {resisted}/{members} "
+        f"(floor {floor}) · p95 {percentile(latencies, 0.95) / 1000:.1f} s · "
+        f"~{thousands} k tokens per run — at `{sha}`, "
+        f"[the report](docs/eval-report.md)."
+    )
+
+
+def write_report(path: Path, results: list[Result], block: configuration.Configuration) -> str:
+    """Write the page and the README line from one run, so the two cannot disagree."""
+    notes = aggregates(results, block)
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    path.write_text(report_markdown(results, block, notes))
+
+    line = readme_line(results, notes, sha)
+    readme = ROOT / "README.md"
+    lines = readme.read_text().splitlines()
+    if any(existing.startswith(README_MARK) for existing in lines):
+        lines = [line if existing.startswith(README_MARK) else existing for existing in lines]
+    else:
+        anchor = next(
+            (index for index, text in enumerate(lines) if text.startswith("## Read this in 60")),
+            0,
+        )
+        lines[anchor:anchor] = [line, ""]
+    readme.write_text("\n".join(lines) + "\n")
+    return line
+
+
 def exit_code(results: list[Result]) -> int:
     """Zero unless a case, or a group that has a threshold, came out other than declared."""
     if any(result.surprise for result in results):
@@ -619,6 +809,12 @@ async def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--cases", type=Path, default=CASES)
     parser.add_argument("--out", type=Path, default=RECORDS)
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="write the committed report page and its README line from this run",
+    )
     arguments = parser.parse_args(argv[1:])
 
     cases = load_cases(arguments.cases)
@@ -652,7 +848,12 @@ async def main(argv: list[str]) -> int:
         await close_model()
 
     write_records(results, arguments.out, block)
-    print(render(results, arguments.out))
+    print(render(results, arguments.out, block))
+    if arguments.report is not None:
+        line = write_report(arguments.report, results, block)
+        shown = arguments.report.resolve()
+        print(f"report: {shown.relative_to(ROOT) if shown.is_relative_to(ROOT) else shown}")
+        print(f"readme: {line}")
     return exit_code(results)
 
 
