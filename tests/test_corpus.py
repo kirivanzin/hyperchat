@@ -8,9 +8,14 @@ out of the corpus, and check the hash moves when a document does.
 
 from __future__ import annotations
 
+import fnmatch
+from pathlib import Path
+
 import pytest
 
 from hyperchat import agent, corpus
+
+REPO = Path(__file__).resolve().parents[1]
 
 
 def test_every_document_in_the_manifest_reads():
@@ -78,3 +83,49 @@ def test_the_tool_itself_refuses_a_path_without_help_from_the_model():
     """Called directly, not through the graph: the refusal has to be in the tool, not in the prompt."""
     with pytest.raises(corpus.NotInCorpus):
         agent.read_document.invoke({"name": "../.secret/x"})
+
+
+def test_every_document_in_the_manifest_reaches_the_image():
+    """A corpus that is not in the image passes every local test and helps nobody.
+
+    This is the check that runs where there is no docker: the manifest, the `COPY` lines and the
+    ignore file have to agree, and the failure they prevent is a document that exists in the checkout
+    and not in `/app` — which no test in the checkout can otherwise see.
+    """
+    dockerfile = (REPO / "Dockerfile").read_text()
+    copies = " ".join(line for line in dockerfile.splitlines() if line.startswith("COPY "))
+    rules = [
+        line.strip()
+        for line in (REPO / ".dockerignore").read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    ignored = [rule for rule in rules if not rule.startswith("!")]
+    unignored = {rule[1:] for rule in rules if rule.startswith("!")}
+
+    def excluded(name: str) -> bool:
+        for rule in ignored:
+            pattern = rule.rstrip("/")
+            if rule.endswith("/") and name.startswith(pattern + "/"):
+                return True
+            if fnmatch.fnmatch(name, pattern):
+                return True
+        return False
+
+    for name in corpus.DOCUMENTS:
+        assert (REPO / name).is_file(), f"{name} is in the manifest and not in the checkout"
+        if name.startswith("src/"):
+            assert "COPY src ./src" in copies, "the source tree is not copied into the image"
+            continue
+        assert name in copies, f"{name} is in the manifest and no COPY line puts it in the image"
+        assert not excluded(name) or name in unignored, (
+            f"{name} is copied and .dockerignore keeps it out of the context: "
+            f"docker would fail, or ship a corpus with a hole in it"
+        )
+
+
+def test_the_manifest_is_not_empty_and_the_tool_description_matches_it():
+    """The model's vocabulary is the manifest: a name it cannot ask for is a document it cannot read."""
+    description = agent.read_document.description
+    assert len(corpus.DOCUMENTS) == sum(
+        1 for line in description.splitlines() if line.startswith("- ")
+    )
