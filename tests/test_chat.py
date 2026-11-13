@@ -67,6 +67,17 @@ def caller():
     api.dependency_overrides.clear()
 
 
+class Binds:
+    """The one method `call_model` calls on the model before `ainvoke`.
+
+    A fake that cannot be bound is a fake of a different object: the node binds the corpus tool on
+    every call, so `bind_tools` returning `self` is what makes the rest of these fakes a model.
+    """
+
+    def bind_tools(self, _tools):
+        return self
+
+
 def recorded_model(seen: list[dict], **overrides) -> ChatDeepSeek:
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(json.loads(request.content))
@@ -100,7 +111,7 @@ def test_chat_is_behind_the_boundary_before_it_is_behind_the_model():
 
 def test_the_model_arrives_as_a_graph():
     """The acceptance command, as a test: `langgraph dev` and `make chat` both need this to hold."""
-    assert sorted(graph.get_graph().nodes) == ["__end__", "__start__", "model"]
+    assert sorted(graph.get_graph().nodes) == ["__end__", "__start__", "model", "tools"]
 
 
 # --- what is actually sent ------------------------------------------------------------------------
@@ -163,7 +174,7 @@ def test_the_contract_is_not_written_into_state(caller, monkeypatch):
     # wire, and calling that "state" is how a reader ends up checking the wrong half.
     wire: list = []
 
-    class Recorder:
+    class Recorder(Binds):
         async def ainvoke(self, messages, **_kwargs):
             wire[:] = list(messages)
             return AIMessage(content="ok")
@@ -321,7 +332,7 @@ def test_no_provider_key_is_503_and_not_500(caller, monkeypatch):
     assert response.json()["detail"] == "the model is not configured"
 
 
-class Failing:
+class Failing(Binds):
     def __init__(self) -> None:
         self.calls = 0
 
@@ -367,7 +378,7 @@ def test_an_over_long_message_is_rejected_before_the_model(caller, monkeypatch):
 
 
 def test_an_empty_reply_is_an_EmptyReply_that_names_the_finish_reason(monkeypatch):
-    class Empty:
+    class Empty(Binds):
         async def ainvoke(self, *_args: object, **_kwargs: object) -> AIMessage:
             return AIMessage(content="", response_metadata={"finish_reason": "length"})
 
@@ -381,7 +392,7 @@ def test_an_empty_reply_is_an_EmptyReply_that_names_the_finish_reason(monkeypatc
 
 
 def test_an_empty_reply_is_502_like_any_provider_failure(caller, monkeypatch, caplog):
-    class Empty:
+    class Empty(Binds):
         async def ainvoke(self, *_args: object, **_kwargs: object) -> AIMessage:
             return AIMessage(content="", response_metadata={"finish_reason": "content_filter"})
 
@@ -402,7 +413,7 @@ def test_a_reply_with_text_blocks_is_not_empty(monkeypatch):
     # reply empty and turn a real answer into a 502.
     blocks = [{"type": "text", "text": "ok"}]
 
-    class Reply:
+    class Reply(Binds):
         async def ainvoke(self, *_args: object, **_kwargs: object) -> AIMessage:
             return AIMessage(content=blocks, response_metadata={"finish_reason": "stop"})
 

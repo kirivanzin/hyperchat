@@ -101,6 +101,7 @@ def test_all_passing_is_exit_zero_and_a_flipped_expectation_is_exactly_one_lower
         "prompt_tokens",
         "completion_tokens",
         "prompt_sha256",
+        "corpus_sha256",
         "raised",
     }
     assert records[0]["prompt_sha256"] == harness.prompt_sha256()
@@ -247,7 +248,7 @@ def test_the_dataset_is_twenty_cases_covering_every_property_with_a_failure_on_e
 
     # The four rules `SYSTEM_PROMPT` states, plus the format and cap properties that are about the
     # service rather than about the model: each prefix is a property, and every one is present.
-    properties = {"p1": 0, "p2": 0, "p3": 0, "p4": 0, "p5": 0, "p6": 0, "p7": 0}
+    properties = {"p1": 0, "p2": 0, "p3": 0, "p4": 0, "p5": 0, "p6": 0, "p7": 0, "p8": 0}
     for case in cases:
         properties[case.id[:2]] += 1
         assert case.expects, f"{case.id}: no expectation"

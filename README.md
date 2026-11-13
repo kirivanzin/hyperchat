@@ -50,6 +50,7 @@ that proves the negative direction, and a history that does not need rewriting.
 | `src/hyperchat/main.py` | The routes. `/`, `/livez` and `/readyz` are open; everything under `/api` is behind the router's dependency. |
 | `src/hyperchat/auth.py` | The trust boundary: token verification, the allowlist, and a rate-limited key cache. |
 | `src/hyperchat/agent.py` | The model call as a one-node graph — the same object `/api/chat` awaits and `make chat` runs. |
+| `src/hyperchat/corpus.py` | The six documents the agent may read, and the manifest that is the whole of what it can reach. |
 | `src/hyperchat/config.py` | What the process refuses to start without, and what it reads on demand. |
 | `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, base images pinned by digest. |
 | `Makefile` | Every operation, in the order it happens. |

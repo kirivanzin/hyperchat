@@ -21,7 +21,13 @@ scripts/
 AGENTS.md
 tests/
 evals/
-docs/
+# The four documents the agent reads are the exception, and they are named rather than the whole
+# directory: the context is what the `COPY` lines can see, so excluding `docs/` outright would leave
+# the corpus out of the image and the failure would only appear in the deploy.
+docs/*
+!docs/authentication.md
+!docs/repository-as-code.md
+!docs/contributor.md
 *.env
 *.env.*
 *.pem
