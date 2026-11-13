@@ -70,6 +70,14 @@ would be committed — it is git-ignored. It is that a checkout gets copied, cle
 indexed by tools that were never asked to keep a secret, and a rule with one exception is a rule that
 gets forgotten. `Makefile`'s `LOCAL_ENV` is the enforcement.
 
+The **LangSmith key** follows that rule rather than a second one. `LANGSMITH_API_KEY` is read for a local
+command from `~/.config/hyperchat/langsmith.token`, outside every checkout, and `.env` refuses it the
+same way; in the deployed revision it is a Secret Manager reference exactly like the provider key, with
+the same `secretAccessor` grant on the runtime account, so one grant pattern covers both. It is not a
+security boundary — tracing is report-only, and a revision without a key runs untraced and says
+`tracing=off` on its configuration line — but it is a credential to a third party, and a checkout is
+not where a credential lives.
+
 ## Config refuses to start
 
 `EXPECTED_AUDIENCE` and `ALLOWED_SUBS` are read at import and have no defaults. A process that boots

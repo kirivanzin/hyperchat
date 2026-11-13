@@ -247,7 +247,7 @@ def test_a_truncated_tool_call_is_a_case_result(monkeypatch):
         raise TruncatedToolCall("the reply was cut mid tool call (1 invalid, finish_reason=length)")
 
     monkeypatch.setattr(harness, "run_graph", cut)
-    reply = asyncio.run(harness.ask(case))
+    reply = asyncio.run(harness.ask(case, harness.configuration.resolved()))
 
     assert reply.raised == "TruncatedToolCall"
     assert "cut mid tool call" in reply.text

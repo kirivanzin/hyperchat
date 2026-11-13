@@ -16,6 +16,10 @@ dependencies = [
     "langchain-core>=1.8.0",
     "langchain-deepseek>=1.1.1",
     "langgraph>=1.2.20",
+    # Imported directly by `hyperchat.tracing` for the decision it reports, not only through
+    # `langchain-core`: declaring what is imported is the rule the comment above states, and a
+    # transitive dependency is one an upgrade elsewhere can drop.
+    "langsmith>=0.14.17",
     "pyjwt[crypto]>=2.15.1",
     "uvicorn>=0.54.0",
 ]

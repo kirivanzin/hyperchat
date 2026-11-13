@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
 import math
 import os
@@ -73,7 +74,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from hyperchat import configuration, corpus
+from hyperchat import configuration, corpus, tracing
 from hyperchat.agent import (
     BudgetExceeded,
     EmptyReply,
@@ -414,8 +415,13 @@ async def _pin(max_tokens: int | None) -> None:
     _pinned = want
 
 
-async def ask(case: Case) -> Reply:
-    """One case through the run the service performs, with the cap and any bound this case asks for."""
+async def ask(case: Case, block: configuration.Configuration) -> Reply:
+    """One case through the run the service performs, with the cap and any bound this case asks for.
+
+    `block` is the run's configuration, resolved once in `main` rather than here: a case may change
+    `PROVIDER_MAX_TOKENS`, so a block read inside the loop would describe the last case instead of the
+    run — and the trace of that case would carry a hash the record beside it does not.
+    """
     await _pin(case.max_tokens)
     started = time.perf_counter()
     # The same entry point the endpoint and `make chat` use, so the run bounds apply here rather than
@@ -425,8 +431,8 @@ async def ask(case: Case) -> Reply:
             result = await run_graph(
                 [HumanMessage(case.input)],
                 # The same subject `make chat` sends: a subject for the record, not a claim about a
-                # person.
-                {"metadata": {"sub": "eval"}},
+                # person — plus the three hashes, from the block this run prints and records.
+                {"metadata": configuration.run_metadata("eval", block)},
             )
         except (StepLimitExceeded, BudgetExceeded) as stopped:
             # A bound is a result: it says which one fired, which is what a 504 carries.
@@ -713,7 +719,7 @@ def report_markdown(
         "## Configuration",
         "",
         "```",
-        configuration.line("eval", block),
+        configuration.line("eval", block, **tracing.fields()),
         "```",
         "",
         "## Scores",
@@ -828,6 +834,10 @@ async def main(argv: list[str]) -> int:
     print(
         configuration.line(
             "eval",
+            block,
+            # The tracing report rides on this line, not a second one, and before the case counts:
+            # it is a fact about the configuration, while they are facts about this run.
+            **tracing.fields(),
             cases=len(cases),
             decided=sum(1 for case in cases if case.group is None),
             grouped=sum(1 for case in cases if case.group is not None),
@@ -838,7 +848,7 @@ async def main(argv: list[str]) -> int:
         flush=True,
     )
     try:
-        results = await evaluate(cases, ask)
+        results = await evaluate(cases, functools.partial(ask, block=block))
     except NotConfigured:
         print(
             "no provider key: set PROVIDER_API_KEY for this command. The model is off, not broken.",

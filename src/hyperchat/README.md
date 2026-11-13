@@ -83,11 +83,61 @@ every eval record: `model`, `max_tokens`, `temperature`, `timeout_seconds`, `max
 `budget_seconds`, `rate_per_minute`, `prompt_sha256`, `corpus_sha256`, and one `config_sha256` over
 all nine in a fixed order. The service logs `service config …` at startup and the harness writes
 `eval config …` as its first line, so one `grep` answers "what is running" and "what did this score
-measure" with the same shape — the harness adds `cases`, `decided`, `grouped` and `overrides`, and
-the service's `overrides` is empty because it has no cases.
+measure" with the same shape — the harness adds `cases`, `decided`, `grouped` and `overrides`, both
+add the tracing pairs below, and the service's `overrides` is empty because it has no cases.
 
-The API key is not in it, and a test asserts no eight-character piece of one appears. A configuration
-that can carry a credential is a configuration that ends up pasted into an issue with the rest of it.
+Neither the provider key nor the LangSmith key is in it, and a test asserts no eight-character piece of
+either appears. A configuration that can carry a credential is a configuration that ends up pasted into
+an issue with the rest of it.
+
+## Tracing, and where the runs go
+
+`LANGSMITH_TRACING=true` turns tracing on for any process that calls the graph, and the fact is written
+on that same configuration line rather than a second one. A service that answers 200 with an empty
+project view is the one failure here that is otherwise silent, and two lines stating one fact is how
+they disagree. `src/hyperchat/tracing.py` asks langsmith (`tracing_is_enabled`, `resolve_destination`,
+`get_env_var`) rather than re-deriving its rules, so the report cannot drift from the decision it
+reports, and it is report-only: it enables nothing, disables nothing, and cannot fail a request.
+
+Every shape below looks like a working service from the outside, which is why each is named:
+
+| On the line | What it means |
+|---|---|
+| `tracing=off tracing_why=LANGSMITH_TRACING-is-not-true` | tracing is off; no run is built |
+| `tracing=off tracing_why=a-project-and-an-agent-address-are-both-set` | two destinations, so a call that names none traces nothing |
+| `tracing=off tracing_why=the-agent-address-is-incomplete-or-invalid` | half an address, or an environment that is not local, development, staging or production |
+| `tracing=on tracing_project=… tracing_api_key=unset` | on, and going nowhere: runs are built and never sent |
+
+and the healthy two: `tracing=on tracing_project=…` and `tracing=on tracing_agent=id/environment`. The
+`tracing_inputs` and `tracing_outputs` values sit beside them, read from the same variables the client
+reads and compared the way the client compares them (`"true"`, not truthiness), because "what is in the
+trace" is a property of the configuration rather than an environment detail nobody checks.
+
+**A trace is attributable.** Every run carries `config_sha256`, `prompt_sha256`, `corpus_sha256` and
+`sub` in its `metadata`, which langsmith records as run metadata: the same block the startup line
+prints and every eval record writes. A trace of an answer from an unknown configuration is the defect
+`#87` fixed for scores, and the `sub` already rides to the provider as the end-user id.
+
+**The deployed revision does not keep the caller's text.** `LANGSMITH_HIDE_INPUTS=true` and
+`LANGSMITH_HIDE_OUTPUTS=true` are read by the client, so inputs and outputs are dropped before a run
+leaves the process. What is left is the run tree, the tool calls, the token counts, the latency,
+`finish_reason` and the model — enough to answer "why was it slow", "did it call the tool" and "which
+turn failed". The message, the documents read and the reply are the caller's content, and `main.py`
+already promises not to keep those. A full trace stays a local opt-in.
+
+**The key follows the provider key's rule.** Not in `.env`, not in the checkout, not in the image:
+`LANGSMITH_API_KEY` is read from `~/.config/hyperchat/langsmith.token` by the `Makefile` for a local
+command, and in the deployed revision it is a Secret Manager reference like `PROVIDER_API_KEY`, with
+the same `secretAccessor` grant. `make deploy` turns tracing on in the revision only when there is a
+key to send with; without one the revision runs untraced and its line says `tracing=off`. A full local
+trace, with the key never on the command line:
+
+```sh
+MESSAGE='How is the corpus bounded?' LANGSMITH_TRACING=true make chat
+```
+
+Nothing here fails a request because tracing is misconfigured. An unreachable endpoint, a bad key or an
+ambiguous destination is a line in the log, because observability is not a gate.
 
 ## The corpus, and the one tool
 

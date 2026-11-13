@@ -86,15 +86,26 @@ build: ## Build the image for this commit, pulling the base image
 	docker build --pull -t $(LOCAL) .
 
 # The environment both local targets need, in one place so the two cannot drift: `.env` for the
-# audience and the allowlist, and the provider key from a file outside the checkout. A `.env` that sets
-# PROVIDER_API_KEY is refused rather than preferred — docs/authentication.md has the reason.
+# audience and the allowlist, and each credential from a file outside the checkout. A `.env` that sets
+# either key is refused rather than preferred — docs/authentication.md has the reason.
+#
+# The two keys are two checks rather than one loop because each refusal names the file the value
+# belongs in, and a message that says "the key" about either of two keys is the message somebody acts
+# on wrongly. `LANGSMITH_API_KEY` is optional: without it the command runs untraced and says so on its
+# first line, which is the same report the service gives.
 LOCAL_ENV = if [ -f .env ] && grep -qE '^[[:space:]]*(export[[:space:]]+)?PROVIDER_API_KEY=' .env; then \
               echo "PROVIDER_API_KEY is in .env, and it is a credential: it does not go in a checkout." >&2; \
               echo "keep it in $$HOME/.config/hyperchat/agent-deepseek.token, or export it for one command." >&2; \
               exit 1; fi; \
+            if [ -f .env ] && grep -qE '^[[:space:]]*(export[[:space:]]+)?LANGSMITH_API_KEY=' .env; then \
+              echo "LANGSMITH_API_KEY is in .env, and it is a credential: it does not go in a checkout." >&2; \
+              echo "keep it in $$HOME/.config/hyperchat/langsmith.token, or export it for one command." >&2; \
+              exit 1; fi; \
             set -a; [ -f .env ] && . ./.env; set +a; \
             if [ -z "$$PROVIDER_API_KEY" ] && [ -f "$$HOME/.config/hyperchat/agent-deepseek.token" ]; then \
-              PROVIDER_API_KEY=$$(cat "$$HOME/.config/hyperchat/agent-deepseek.token"); export PROVIDER_API_KEY; fi
+              PROVIDER_API_KEY=$$(cat "$$HOME/.config/hyperchat/agent-deepseek.token"); export PROVIDER_API_KEY; fi; \
+            if [ -z "$$LANGSMITH_API_KEY" ] && [ -f "$$HOME/.config/hyperchat/langsmith.token" ]; then \
+              LANGSMITH_API_KEY=$$(cat "$$HOME/.config/hyperchat/langsmith.token"); export LANGSMITH_API_KEY; fi
 
 dev: ## Run the app from the source tree on PORT, reading .env; no image
 	@$(LOCAL_ENV); uv run uvicorn hyperchat.main:api --host 127.0.0.1 --port $(PORT)
@@ -279,8 +290,12 @@ deploy-plan: ## Show what the Cloud Run root would change, without changing it
 	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
-		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false $(BACKEND); \
-		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) plan -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)"
+		tracing=$$([ -n "$$LANGSMITH_API_KEY" ] && echo true || echo false); \
+		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" TF_VAR_langsmith_api_key="$$LANGSMITH_API_KEY" \
+			$(TERRAFORM_APP) init -input=false $(BACKEND); \
+		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" TF_VAR_langsmith_api_key="$$LANGSMITH_API_KEY" \
+			$(TERRAFORM_APP) plan -input=false -var="project=$(PROJECT)" -var="image=$(REMOTE)" \
+				-var="langsmith_tracing=$$tracing"
 
 deploy: ## Deploy this commit's image, secret version and service to Cloud Run in one apply
 	@[ -n "$(PROJECT)" ] || { \
@@ -312,8 +327,12 @@ deploy: ## Deploy this commit's image, secret version and service to Cloud Run i
 	@$(LOCAL_ENV); [ -n "$$PROVIDER_API_KEY" ] || { \
 			echo "TF_VAR_provider_api_key would be empty: set PROVIDER_API_KEY in $$HOME/.config/hyperchat/agent-deepseek.token or the environment." >&2; \
 			exit 1; }; \
-		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) init -input=false $(BACKEND); \
-		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" $(TERRAFORM_APP) apply -input=false $(AUTO_APPROVE) -var="project=$(PROJECT)" -var="image=$(REMOTE)"
+		tracing=$$([ -n "$$LANGSMITH_API_KEY" ] && echo true || echo false); \
+		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" TF_VAR_langsmith_api_key="$$LANGSMITH_API_KEY" \
+			$(TERRAFORM_APP) init -input=false $(BACKEND); \
+		TF_VAR_provider_api_key="$$PROVIDER_API_KEY" TF_VAR_langsmith_api_key="$$LANGSMITH_API_KEY" \
+			$(TERRAFORM_APP) apply -input=false $(AUTO_APPROVE) -var="project=$(PROJECT)" -var="image=$(REMOTE)" \
+				-var="langsmith_tracing=$$tracing"
 
 pipeline-audit: ## Check the live pipeline against what the README claims (needs gh; owner for protection)
 	@REPO=$(FULL_NAME) scripts/pipeline-audit.sh

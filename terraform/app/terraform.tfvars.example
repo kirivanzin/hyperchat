@@ -15,3 +15,11 @@ allowed_subs = "a-human-subject"
 # Bump this to rotate the provider key after replacing the token file. A deploy with no bump does not
 # create a new secret version.
 # provider_key_version = 2
+
+# LangSmith tracing. `make deploy` sets `langsmith_tracing` from whether LANGSMITH_API_KEY is present,
+# so neither is written here: the key arrives as TF_VAR_langsmith_api_key from
+# ~/.config/hyperchat/langsmith.token, never from a tfvars. A revision without a key runs untraced and
+# its startup config line says `tracing=off`.
+# langsmith_project = "hyperchat-dev"
+# Bump this to rotate the LangSmith key after replacing the token file, exactly as provider_key_version.
+# langsmith_key_version = 2

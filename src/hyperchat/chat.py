@@ -19,6 +19,7 @@ import sys
 
 from langchain_core.messages import HumanMessage
 
+from hyperchat import configuration
 from hyperchat.agent import (
     BudgetExceeded,
     NotConfigured,
@@ -34,8 +35,9 @@ async def run(message: str) -> str:
         result = await run_graph(
             [HumanMessage(message)],
             # A hand-run graph has no caller. "cli" is a subject for the record rather than a claim
-            # about a person, and it keeps the provider's end-user id populated.
-            {"metadata": {"sub": "cli"}},
+            # about a person, and it keeps the provider's end-user id populated. The three hashes are
+            # resolved once here: a trace of this run has to say which configuration produced it.
+            {"metadata": configuration.run_metadata("cli")},
         )
     finally:
         await close_model()
