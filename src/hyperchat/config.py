@@ -156,7 +156,7 @@ def provider_settings() -> Provider:
     provider's default."""
     return Provider(
         model=os.environ.get("PROVIDER_MODEL", "").strip() or "deepseek-chat",
-        max_tokens=_positive_int("PROVIDER_MAX_TOKENS", 256),
+        max_tokens=_positive_int("PROVIDER_MAX_TOKENS", 640),
         api_key=os.environ.get("PROVIDER_API_KEY", "").strip() or None,
         temperature=_temperature("PROVIDER_TEMPERATURE", 0.0),
         timeout_seconds=_positive_float("PROVIDER_TIMEOUT_SECONDS", 20.0),

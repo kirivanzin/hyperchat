@@ -34,6 +34,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
+from hyperchat import corpus
 from hyperchat.agent import (
     BudgetExceeded,
     NotConfigured,
@@ -81,7 +82,9 @@ async def lifespan(_app: FastAPI):
     # The contract's identity, once per process. A log line that cannot be tied to the text it was
     # produced under says nothing about what answered, and the eval records the same hash for the
     # same reason. `INFO`, so it is visible where the level is at INFO rather than uvicorn's default.
-    logger.info("agent contract prompt_sha256=%s", prompt_sha256())
+    logger.info(
+        "agent contract prompt_sha256=%s corpus_sha256=%s", prompt_sha256(), corpus.corpus_sha256()
+    )
 
     try:
         get_model()

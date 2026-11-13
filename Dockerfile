@@ -27,6 +27,12 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
+# The corpus the agent may read, copied to the same relative paths it has in the checkout, which is
+# why `hyperchat.corpus.ROOT` needs no environment variable and no branch. Only the six documents in
+# the manifest: `docs/contributor-runbook.md` is deliberately not here, and neither is the source.
+COPY SECURITY.md ./
+COPY docs/authentication.md docs/repository-as-code.md docs/contributor.md ./docs/
+
 USER app
 EXPOSE 8080
 
