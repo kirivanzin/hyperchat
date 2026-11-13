@@ -52,7 +52,8 @@ def read(name: str) -> str:
     resolved = path.resolve()
     if not resolved.is_relative_to(ROOT.resolve()):
         raise NotInCorpus(f"{name!r} resolves outside the corpus.")
-    return resolved.read_text(encoding="utf-8")
+    # What the hash covers is what the tool returns: one corpus, not two.
+    return stable_content(name).decode("utf-8")
 
 
 # Lines a generator writes into a corpus document. They are excluded from the hash because they are
@@ -62,12 +63,15 @@ def read(name: str) -> str:
 GENERATED = ("**Latest eval:**",)
 
 
-def _stable_content(path: Path, name: str) -> bytes:
-    """The document's bytes without any generated line."""
+def stable_content(name: str) -> bytes:
+    """The bytes of one document, without any generated line. The one view of the corpus.
+
+    Both the tool and the hash read through this. Otherwise there are two corpora — the one the agent
+    reads and the one the hash covers — and the agent could quote a line the hash does not account
+    for, leaving "a moved hash means a moved document" as "…except that line".
+    """
     raw = (ROOT / name).read_bytes()
-    if name not in DOCUMENTS or not any(
-        marker in raw.decode("utf-8", "replace") for marker in GENERATED
-    ):
+    if not any(marker in raw.decode("utf-8", "replace") for marker in GENERATED):
         return raw
     kept = [
         line
@@ -87,7 +91,7 @@ def corpus_sha256() -> str:
     for name in DOCUMENTS:
         digest.update(name.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(_stable_content(ROOT / name, name))
+        digest.update(stable_content(name))
         digest.update(b"\0")
     return digest.hexdigest()
 

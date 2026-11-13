@@ -129,3 +129,18 @@ def test_the_manifest_is_not_empty_and_the_tool_description_matches_it():
     assert len(corpus.DOCUMENTS) == sum(
         1 for line in description.splitlines() if line.startswith("- ")
     )
+
+
+def test_the_tool_and_the_hash_see_the_same_bytes():
+    """One corpus, not two: what the agent can quote is exactly what the hash covers.
+
+    The generated README line is excluded from the hash — otherwise regenerating the report moves the
+    corpus — and if `read()` did not go through the same function, the agent could quote a line the
+    hash does not account for, and a moved hash would mean "a moved document, except that line".
+    """
+    for name in corpus.DOCUMENTS:
+        assert corpus.read(name).encode("utf-8") == corpus.stable_content(name), name
+    # And the generated line is genuinely absent from both, where it exists at all.
+    if "**Latest eval:**" in (REPO / "README.md").read_text():
+        assert "**Latest eval:**" not in corpus.read("README.md")
+        assert b"**Latest eval:**" not in corpus.stable_content("README.md")
