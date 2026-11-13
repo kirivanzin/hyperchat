@@ -90,7 +90,7 @@ def test_all_passing_is_exit_zero_and_a_flipped_expectation_is_exactly_one_lower
     assert "PONGX" in " ".join(failing[0].failures)
 
     path = tmp_path / "results.jsonl"
-    harness.write_records(failing, path)
+    harness.write_records(failing, path, harness.configuration.resolved())
     records = [json.loads(line) for line in path.read_text().splitlines()]
     assert [record["id"] for record in records] == ["a", "b", "c"]
     assert set(records[0]) == {
@@ -100,11 +100,12 @@ def test_all_passing_is_exit_zero_and_a_flipped_expectation_is_exactly_one_lower
         "finish_reason",
         "prompt_tokens",
         "completion_tokens",
-        "prompt_sha256",
-        "corpus_sha256",
+        "config",
+        "config_sha256",
         "raised",
     }
-    assert records[0]["prompt_sha256"] == harness.prompt_sha256()
+    assert records[0]["config_sha256"] == harness.configuration.resolved().sha256()
+    assert records[0]["config"]["model"]
     assert records[0]["pass"] is False
     assert records[1]["pass"] is True
 
