@@ -77,11 +77,35 @@ def resolved() -> Configuration:
     )
 
 
+def run_metadata(sub: str, block: Configuration | None = None) -> dict[str, str]:
+    """What a run carries so that a trace of it can be attributed to a configuration and a caller.
+
+    The same four values an eval record already carries, on the run itself, because a trace of an
+    answer from an unknown configuration is the defect `#87` fixed for scores. `sub` is the caller:
+    it already rides to the provider as the end-user id, and here it is what makes a trace a person's.
+
+    `block` is passed by an entry point that resolved one, so the hash on the trace is the hash its
+    startup line printed. Resolving here instead would be a second reading of an environment the run
+    has already described, and the eval changes `PROVIDER_MAX_TOKENS` per case — which is exactly how
+    two hashes for one run happen.
+    """
+    block = block or resolved()
+    return {
+        "sub": sub,
+        "config_sha256": block.sha256(),
+        "prompt_sha256": block.prompt_sha256,
+        "corpus_sha256": block.corpus_sha256,
+    }
+
+
 def line(prefix: str, block: Configuration | None = None, **extra: Any) -> str:
     """`<prefix> config model=… … config_sha256=…`, with any run-specific keys after the nine.
 
     One format for the service and the harness, so one `grep` answers "what is running" and "what did
-    this score measure" — and `parse` reads either.
+    this score measure" — and `parse` reads either. The extras are where a fact that is not part of
+    the configuration goes: the eval's case counts, and the tracing report `hyperchat.tracing` writes
+    as pairs of its own. They are after `config_sha256` on purpose, so the hashed block is a prefix
+    that reads the same in both lines and a tracing change cannot move a hash.
     """
     block = block or resolved()
     parts = [f"{prefix} config", block.attributes(), f"config_sha256={block.sha256()}"]

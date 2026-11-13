@@ -78,7 +78,7 @@ variable "provider_secret" {
 }
 
 variable "runtime_account" {
-  description = "The service account the revision runs as. It gets one grant: secretAccessor on the provider secret."
+  description = "The service account the revision runs as. Its grants are secretAccessor on the secrets it reads: the provider key and, when tracing is wired, the LangSmith key."
   type        = string
   default     = "hyperchat-runtime"
 }
@@ -129,12 +129,79 @@ variable "provider_key_version" {
   }
 }
 
+variable "langsmith_project" {
+  description = "The LangSmith project deployed runs are sent to, when tracing is wired. The service's startup line names it, so a trace is findable from the log."
+  type        = string
+  default     = "hyperchat-dev"
+
+  validation {
+    condition     = length(trimspace(var.langsmith_project)) > 0
+    error_message = "langsmith_project must not be empty: it is where the runs go."
+  }
+}
+
+variable "langsmith_secret" {
+  description = "Secret Manager secret that holds LANGSMITH_API_KEY."
+  type        = string
+  default     = "langsmith-api-key"
+}
+
+variable "langsmith_tracing" {
+  description = "Whether this revision traces to LangSmith. A separate value from the key because a count cannot be derived from an ephemeral one: `make deploy` sets it from the key being present, and a precondition refuses the pair where it is true and the key is empty."
+  type        = bool
+  default     = false
+}
+
+variable "langsmith_api_key" {
+  description = "The LangSmith API key. Empty is not a broken deploy as long as langsmith_tracing is false: the revision then runs untraced and its startup line says tracing=off, because observability is not a gate."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+  nullable    = false
+  default     = ""
+}
+
+variable "langsmith_key_version" {
+  description = "Integer that triggers a new LangSmith secret version when bumped. The value itself comes from langsmith_api_key."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.langsmith_key_version >= 1
+    error_message = "langsmith_key_version must be at least 1; bump it deliberately to rotate the key."
+  }
+}
+
 # A service account of its own, not the default compute account: that account has project-wide editor
 # rights, and a runtime identity with those is a blast radius rather than a deployment detail.
 resource "google_service_account" "runtime" {
   account_id   = var.runtime_account
   display_name = "hyperchat Cloud Run runtime"
-  description  = "Runs the service. The only grant is secretAccessor on the provider secret."
+  description  = "Runs the service. Its grants are secretAccessor on the provider key and, when tracing is wired, the LangSmith key."
+}
+
+locals {
+  # Tracing is wired only when a key is supplied. An absent key leaves the revision untraced and its
+  # config line says `tracing=off`, rather than a deploy that refuses: observability is not a gate, and
+  # a merge that could not deploy because nobody had a LangSmith key would make it one.
+  #
+  # `langsmith_tracing` exists only because a `count` cannot be derived from an ephemeral value. The
+  # Makefile sets it from the key being present, so it is one fact read twice rather than two settings,
+  # and the secret version's precondition refuses the pair that disagrees.
+  langsmith_enabled = var.langsmith_tracing
+
+  # A deployed revision does not keep the caller's text. The client reads these two flags and drops
+  # inputs and outputs before a run leaves the process: what is left is the run tree, the tool calls,
+  # the token counts, the latency, the finish reason and the model — enough to answer "why was it
+  # slow", "did it call the tool" and "which turn failed". The message, the documents read and the
+  # reply are the caller's content, and `src/hyperchat/main.py` already promises not to keep those.
+  # A full trace stays a local opt-in, where debugging a bad answer is the reason to run one.
+  langsmith_env = local.langsmith_enabled ? {
+    LANGSMITH_TRACING      = "true"
+    LANGSMITH_PROJECT      = var.langsmith_project
+    LANGSMITH_HIDE_INPUTS  = "true"
+    LANGSMITH_HIDE_OUTPUTS = "true"
+  } : {}
 }
 
 # The secret container and its version are Terraform's. The value is write-only: it arrives as
@@ -157,6 +224,50 @@ resource "google_secret_manager_secret_version" "provider_key" {
 
 resource "google_secret_manager_secret_iam_member" "runtime_accessor" {
   secret_id = google_secret_manager_secret.provider_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+# The LangSmith key follows the provider key's rule rather than a second mechanism: write-only, from
+# outside the checkout, a pinned version, and the same secretAccessor grant on the same runtime
+# account, so one grant pattern covers both.
+#
+# Conditional on a key being supplied, and `prevent_destroy` because the other half of that condition
+# is a plan that removes tracing from a live revision. Deploying from a machine whose token file is
+# missing would otherwise tear the secret and the revision's reference to it out in one apply, and
+# nothing would say so — the shape this whole ticket is about.
+resource "google_secret_manager_secret" "langsmith_key" {
+  count     = local.langsmith_enabled ? 1 : 0
+  secret_id = var.langsmith_secret
+
+  replication {
+    auto {}
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_secret_manager_secret_version" "langsmith_key" {
+  count                  = local.langsmith_enabled ? 1 : 0
+  secret                 = google_secret_manager_secret.langsmith_key[0].id
+  secret_data_wo         = var.langsmith_api_key
+  secret_data_wo_version = var.langsmith_key_version
+
+  lifecycle {
+    prevent_destroy = true
+
+    precondition {
+      condition     = trimspace(var.langsmith_api_key) != ""
+      error_message = "langsmith_tracing is true and langsmith_api_key is empty: set TF_VAR_langsmith_api_key from the token file, or leave tracing off."
+    }
+  }
+}
+
+resource "google_secret_manager_secret_iam_member" "langsmith_accessor" {
+  count     = local.langsmith_enabled ? 1 : 0
+  secret_id = google_secret_manager_secret.langsmith_key[0].secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.runtime.email}"
 }
@@ -218,6 +329,32 @@ resource "google_cloud_run_v2_service" "service" {
         }
       }
 
+      # LangSmith, and only when there is a key to send with. The four plain variables and the secret
+      # reference arrive together: `LANGSMITH_TRACING=true` with no key would build a run tree per
+      # request and send none of it, which is exactly the state the startup line exists to make
+      # visible rather than to create.
+      dynamic "env" {
+        for_each = local.langsmith_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.langsmith_enabled ? [1] : []
+        content {
+          name = "LANGSMITH_API_KEY"
+
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.langsmith_key[0].secret_id
+              version = google_secret_manager_secret_version.langsmith_key[0].version
+            }
+          }
+        }
+      }
+
       # `/readyz` gates traffic: it reads the configuration cached at import and never calls the
       # provider. `/livez` is the liveness answer: the process and its event loop, no dependency.
       # 60 seconds, not 6. The app answers /readyz in ~3s on a developer machine with a warm page
@@ -263,7 +400,10 @@ resource "google_cloud_run_v2_service" "service" {
     }
   }
 
-  depends_on = [google_secret_manager_secret_iam_member.runtime_accessor]
+  depends_on = [
+    google_secret_manager_secret_iam_member.runtime_accessor,
+    google_secret_manager_secret_iam_member.langsmith_accessor,
+  ]
 }
 
 # Public invoker, matching the rest of the project, with the app as the gate. The allowlist is what
@@ -293,4 +433,14 @@ output "secret" {
 output "secret_version" {
   description = "The secret version the revision is pinned to."
   value       = google_secret_manager_secret_version.provider_key.version
+}
+
+output "tracing" {
+  description = "Where the deployed revision sends traces, or off. The service's startup line reports the same fact from langsmith's own decision."
+  value       = local.langsmith_enabled ? "langsmith project=${var.langsmith_project} inputs=hidden outputs=hidden" : "off"
+}
+
+output "langsmith_secret" {
+  description = "The Secret Manager secret the revision reads for LangSmith, or null when tracing is off."
+  value       = one(google_secret_manager_secret.langsmith_key[*].secret_id)
 }

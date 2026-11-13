@@ -34,7 +34,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
-from hyperchat import configuration
+from hyperchat import configuration, tracing
 from hyperchat.agent import (
     BudgetExceeded,
     NotConfigured,
@@ -56,6 +56,12 @@ settings = load_settings()
 logger = logging.getLogger("hyperchat")
 
 _limiter: RateLimiter | None = None
+
+# The configuration the startup line reported. Kept so a run's trace carries the hash of the
+# configuration the line printed rather than a second reading of the environment — one process, one
+# configuration, one hash. `None` until the lifespan runs, which is the case for a test client that
+# does not start the app; `run_metadata` then resolves on demand rather than reporting nothing.
+_block: configuration.Configuration | None = None
 
 
 def rate_limiter() -> RateLimiter:
@@ -82,7 +88,13 @@ async def lifespan(_app: FastAPI):
     # config` answers "what is running" and "what did this score measure" the same way. `INFO`, so it
     # is visible where the log level is at INFO rather than uvicorn's default. `overrides` is empty
     # here and named anyway: an absent field and an empty one read differently to a parser.
-    logger.info("%s", configuration.line("service", overrides=""))
+    #
+    # The tracing pairs ride on this line rather than a second one: a misconfigured tracer is the one
+    # failure that is otherwise silent, and two startup lines saying "what is running" is how the two
+    # disagree. They are a report, so they cannot fail this startup.
+    global _block
+    _block = configuration.resolved()
+    logger.info("%s", configuration.line("service", _block, overrides="", **tracing.fields()))
 
     try:
         get_model()
@@ -199,7 +211,7 @@ async def chat(
     try:
         result = await run_graph(
             [HumanMessage(body.message)],
-            {"metadata": {"sub": caller.sub}},
+            {"metadata": configuration.run_metadata(caller.sub, _block)},
         )
     except BudgetExceeded as exc:
         # 504, and it says which bound. A truncated answer returned as 200 is indistinguishable from

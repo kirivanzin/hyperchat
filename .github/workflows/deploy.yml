@@ -179,10 +179,35 @@ jobs:
         if: steps.digest.outputs.exists == 'false'
         run: make push
 
+      - name: is there a LangSmith key?
+        # Read before the apply, because the answer decides whether the revision traces. Absence is a
+        # line, not a failure: an untraced revision is a valid one, and its startup config line says
+        # `tracing=off` — observability is not a gate. A secret that exists but cannot be read is a
+        # failure, and it happens here rather than in a plan that would remove the reference to it.
+        #
+        # The first tracing deploy is local (a key in the token file, `make deploy`), so that
+        # Terraform creates the secret rather than meeting one that `gcloud` made by hand.
+        id: langsmith
+        run: |
+          set -eu
+          if gcloud secrets describe langsmith-api-key --project="$PROJECT" >/dev/null 2>&1; then
+            key="$(gcloud secrets versions access latest \
+              --secret=langsmith-api-key --project="$PROJECT")"
+            echo "::add-mask::$key"
+            echo "key=$key" >> "$GITHUB_OUTPUT"
+            echo "langsmith: a key is in Secret Manager; this revision will trace"
+          else
+            echo "langsmith: no key in Secret Manager; this revision will report tracing=off"
+          fi
+
       - name: deploy
         # The provider key is write-only to Terraform, not absent from the apply. Read the existing
         # Secret Manager version into this process's environment; `make deploy` passes it as
-        # TF_VAR_provider_api_key and Terraform stores it neither in state nor in the plan file.
+        # TF_VAR_provider_api_key and Terraform stores it neither in state nor in the plan file. The
+        # LangSmith key follows the same rule, and a non-empty one is also what turns `langsmith_tracing`
+        # on in the Makefile.
+        env:
+          LANGSMITH_API_KEY: ${{ steps.langsmith.outputs.key }}
         run: |
           set -eu
           PROVIDER_API_KEY="$(gcloud secrets versions access latest \
@@ -205,8 +230,12 @@ jobs:
 
       - name: what the apply left, if it failed
         # A half-applied state is the failure this repository has produced twice; the plan says what
-        # was left behind, and a log without it turns a page into an investigation.
+        # was left behind, and a log without it turns a page into an investigation. The LangSmith key
+        # is passed here too: a plan without it would report a removal that is an artefact of the
+        # diagnostic rather than of the apply.
         if: failure()
+        env:
+          LANGSMITH_API_KEY: ${{ steps.langsmith.outputs.key }}
         run: |
           PROVIDER_API_KEY="$(gcloud secrets versions access latest \
             --secret=provider-api-key --project="$PROJECT")" || true

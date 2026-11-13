@@ -13,7 +13,7 @@ Three words are used precisely here, because two of them are easy to confuse: **
 principal that opens pull requests; **coding agent** is the LLM operating that checkout, inside its
 container.
 
-**Latest eval:** 20/20 decided · injection 5/5 (floor 4) · p95 3.7 s · ~59 k tokens per run — at `d24487a`, [the report](docs/eval-report.md).
+**Latest eval:** 20/20 decided · injection 5/5 (floor 4) · p95 3.9 s · ~58 k tokens per run — at `676b95b`, [the report](docs/eval-report.md).
 
 ## Read this in 60 seconds, 10 minutes, or an hour
 
@@ -52,14 +52,15 @@ that proves the negative direction, and a history that does not need rewriting.
 | `src/hyperchat/main.py` | The routes. `/`, `/livez` and `/readyz` are open; everything under `/api` is behind the router's dependency. |
 | `src/hyperchat/auth.py` | The trust boundary: token verification, the allowlist, and a rate-limited key cache. |
 | `src/hyperchat/agent.py` | The model call as a one-node graph — the same object `/api/chat` awaits and `make chat` runs. |
-| `src/hyperchat/configuration.py` | The nine values a score was produced under, and one hash over them. |
+| `src/hyperchat/configuration.py` | The nine values a score was produced under, and one hash over them; the metadata that makes a trace attributable. |
+| `src/hyperchat/tracing.py` | Whether runs are traced and where they go, asked of langsmith and written on the configuration line. |
 | `src/hyperchat/corpus.py` | The six documents the agent may read, and the manifest that is the whole of what it can reach. |
 | `src/hyperchat/config.py` | What the process refuses to start without, and what it reads on demand. |
 | `Dockerfile` | Installs from `uv.lock`, runs as uid 10001, base images pinned by digest. |
 | `Makefile` | Every operation, in the order it happens. |
 | `terraform/github` | The repository, its settings and its branch protection. Applied once, in two steps. |
 | `terraform/registry` | Artifact Registry, the three project APIs, and the deployer identity. Applied once, by hand. |
-| `terraform/app` | Cloud Run, the runtime identity, the provider secret. Applied by a merge that can change what runs. |
+| `terraform/app` | Cloud Run, the runtime identity, the provider secret and, when a key is supplied, the LangSmith one. Applied by a merge that can change what runs. |
 | `evals/` | The case set `make eval` scores, with two non-model baselines beside it. |
 | `.github/workflows/ci.yml` | Lint, tests, `terraform validate`, and a build that is discarded. |
 | `.github/workflows/deploy.yml` | Deploy a successful `main` build that changed something deployable; prove a non-main ref cannot authenticate. |
@@ -146,14 +147,28 @@ tool cannot drift from the service. The endpoint answers **503** when no key is 
 is off, not broken) and **502** when the provider fails, with the reason logged and not returned. An
 empty reply is a 502 as well, and the log carries `finish_reason`.
 
+## Watching a run
+
+`LANGSMITH_TRACING=true` turns tracing on, and it says where the runs go on the configuration line the
+service already prints: `tracing=off`, or `tracing=on` with the project, the agent address and whether
+inputs and outputs are kept. That report is asked of langsmith rather than restated from its rules, and
+a misconfiguration is a line in the log rather than a failed request — the service answering 200 with
+an empty project view is otherwise silent. The deployed revision hides the caller's text
+(`LANGSMITH_HIDE_INPUTS`, `LANGSMITH_HIDE_OUTPUTS`), so a trace carries the run tree, the tool calls,
+the token counts and the model; a full trace is a local opt-in, with the key outside the checkout:
+
+```sh
+MESSAGE='Reply with exactly: ok' LANGSMITH_TRACING=true make chat
+```
+
 ## Not here yet
 
-Streaming and tracing — what happened, rather than whether it was allowed to happen. The run bounds
-are here: a step ceiling, a time budget, a provider timeout and a per-caller rate, each with its own
-answer (`src/hyperchat/README.md`, and `make limits` for the last one). The next phase is the agent
-itself: tools, a second model, and the security testing that goes with them. `make eval` is the first
-attempt at the other question — not what happened, but whether it was right — and its case set is a
-line per case in `evals/cases.jsonl` with a `why` on each.
+Streaming — the answer as it is produced, rather than after it is finished. The run bounds are here: a
+step ceiling, a time budget, a provider timeout and a per-caller rate, each with its own answer
+(`src/hyperchat/README.md`, and `make limits` for the last one). The next phase is the agent itself:
+tools, a second model, and the security testing that goes with them. `make eval` is the first attempt
+at the other question — not what happened, but whether it was right — and its case set is a line per
+case in `evals/cases.jsonl` with a `why` on each.
 
 ## Where to go deeper
 
