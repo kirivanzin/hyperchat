@@ -55,6 +55,28 @@ def read(name: str) -> str:
     return resolved.read_text(encoding="utf-8")
 
 
+# Lines a generator writes into a corpus document. They are excluded from the hash because they are
+# a pointer to a report rather than documentation: including them makes the hash change every time
+# the report is regenerated, which is the one thing the hash must not do — a moved hash has to mean a
+# moved document.
+GENERATED = ("**Latest eval:**",)
+
+
+def _stable_content(path: Path, name: str) -> bytes:
+    """The document's bytes without any generated line."""
+    raw = (ROOT / name).read_bytes()
+    if name not in DOCUMENTS or not any(
+        marker in raw.decode("utf-8", "replace") for marker in GENERATED
+    ):
+        return raw
+    kept = [
+        line
+        for line in raw.decode("utf-8").splitlines(keepends=True)
+        if not line.startswith(GENERATED)
+    ]
+    return "".join(kept).encode("utf-8")
+
+
 def corpus_sha256() -> str:
     """One hash over every document's name and bytes, in manifest order.
 
@@ -65,7 +87,7 @@ def corpus_sha256() -> str:
     for name in DOCUMENTS:
         digest.update(name.encode("utf-8"))
         digest.update(b"\0")
-        digest.update((ROOT / name).read_bytes())
+        digest.update(_stable_content(ROOT / name, name))
         digest.update(b"\0")
     return digest.hexdigest()
 
