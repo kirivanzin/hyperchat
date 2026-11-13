@@ -71,14 +71,14 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from hyperchat import corpus
+from hyperchat import configuration
 from hyperchat.agent import (
     BudgetExceeded,
+    EmptyReply,
     NotConfigured,
     ProviderFailed,
     StepLimitExceeded,
     close_model,
-    prompt_sha256,
 )
 from hyperchat.agent import run as run_graph
 
@@ -86,11 +86,11 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / "evals" / "cases.jsonl"
 RECORDS = ROOT / "evals" / "results.jsonl"
 
-# `config.py`'s default, repeated here so a run cannot inherit a cap from the shell, and *equal* to it
-# so the eval measures what ships: a per-case override would be a case that passes at a cap nothing
-# serves. A retrieval answer that hits this cap now fails as `finish_reason=length`, which is the
-# signal to raise the default rather than the case.
-DEFAULT_MAX_TOKENS = 640
+# `config.py`'s default, and `PROVIDER_MAX_TOKENS` still wins when it is set: a per-run override is
+# what an operator asks for, and the run says so in its first line rather than hiding it. A retrieval
+# answer that hits the cap fails as `finish_reason=length`, which is the signal to raise the default
+# rather than the case.
+DEFAULT_MAX_TOKENS = int(os.environ.get("PROVIDER_MAX_TOKENS", "").strip() or 640)
 
 
 @dataclass(frozen=True)
@@ -431,6 +431,16 @@ async def ask(case: Case) -> Reply:
                 raised=type(stopped).__name__,
                 latency_ms=round((time.perf_counter() - started) * 1000),
             )
+        except EmptyReply as empty:
+            # An empty reply is a *case* result, not a transport failure: the provider answered and
+            # the answer was nothing. The case fails and the run says which, rather than stopping at
+            # the first — which is what a deliberately small cap looks like from here, and the
+            # difference between "every case scored 0" and "nothing here is about the cases".
+            return Reply(
+                text=str(empty),
+                raised=type(empty).__name__,
+                latency_ms=round((time.perf_counter() - started) * 1000),
+            )
     latency_ms = round((time.perf_counter() - started) * 1000)
     message = result["messages"][-1]
     usage = getattr(message, "usage_metadata", None) or {}
@@ -455,11 +465,26 @@ async def evaluate(
     return results
 
 
-def write_records(results: list[Result], path: Path) -> None:
+def overrides(cases: list[Case]) -> str:
+    """Where a case diverges from the shipped configuration.
+
+    This is the part of the header that matters: an override is where a run stops being the service,
+    and a score read without it is a score read without the one thing that says so.
+    """
+    parts: list[str] = []
+    for case in cases:
+        if case.max_tokens is not None:
+            parts.append(f"{case.id}={case.max_tokens}")
+        for name, value in (case.env or {}).items():
+            parts.append(f"{case.id}={name}:{value}")
+    return ",".join(parts)
+
+
+def write_records(results: list[Result], path: Path, block: configuration.Configuration) -> None:
     """One JSONL record per case, with the fields a later comparison can use across runs.
 
-    `prompt_sha256` is on every record because a score with no prompt identity cannot say what it
-    measured: the same cases against two contracts are two different subjects.
+    `config` is on every record because a score with no configuration cannot say what it measured:
+    the same cases against two prompts, two caps or two models are different subjects.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as handle:
@@ -473,8 +498,8 @@ def write_records(results: list[Result], path: Path) -> None:
                         "finish_reason": result.reply.finish_reason,
                         "prompt_tokens": result.reply.prompt_tokens,
                         "completion_tokens": result.reply.completion_tokens,
-                        "prompt_sha256": prompt_sha256(),
-                        "corpus_sha256": corpus.corpus_sha256(),
+                        "config": block.as_dict(),
+                        "config_sha256": block.sha256(),
                         "raised": result.reply.raised,
                     }
                 )
@@ -597,6 +622,21 @@ async def main(argv: list[str]) -> int:
     arguments = parser.parse_args(argv[1:])
 
     cases = load_cases(arguments.cases)
+    # Resolved once, before the first provider call: `_pin` sets the cap per case, so a block read at
+    # the end would describe the last case rather than the run.
+    block = configuration.resolved()
+    print(
+        configuration.line(
+            "eval",
+            cases=len(cases),
+            decided=sum(1 for case in cases if case.group is None),
+            grouped=sum(1 for case in cases if case.group is not None),
+            overrides=overrides(cases),
+        ),
+        # Flushed, because this is the first thing the run writes and a block-buffered header appears
+        # *after* the failure it was supposed to explain when the output is piped.
+        flush=True,
+    )
     try:
         results = await evaluate(cases, ask)
     except NotConfigured:
@@ -611,7 +651,7 @@ async def main(argv: list[str]) -> int:
     finally:
         await close_model()
 
-    write_records(results, arguments.out)
+    write_records(results, arguments.out, block)
     print(render(results, arguments.out))
     return exit_code(results)
 

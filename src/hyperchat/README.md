@@ -69,6 +69,19 @@ SHA-256 of that text, logged once at startup — at `INFO`, so it needs the log 
 than uvicorn's default — and recorded in every eval record, because a score with no prompt identity
 cannot say what it measured.
 
+## The configuration, on one line
+
+Every value that can change an answer is resolved once, printed as one `k=v` line, and written on
+every eval record: `model`, `max_tokens`, `temperature`, `timeout_seconds`, `max_steps`,
+`budget_seconds`, `rate_per_minute`, `prompt_sha256`, `corpus_sha256`, and one `config_sha256` over
+all nine in a fixed order. The service logs `service config …` at startup and the harness writes
+`eval config …` as its first line, so one `grep` answers "what is running" and "what did this score
+measure" with the same shape — the harness adds `cases`, `decided`, `grouped` and `overrides`, and
+the service's `overrides` is empty because it has no cases.
+
+The API key is not in it, and a test asserts no eight-character piece of one appears. A configuration
+that can carry a credential is a configuration that ends up pasted into an issue with the rest of it.
+
 ## The corpus, and the one tool
 
 `read_document(name)` returns one document from `src/hyperchat/corpus.py`'s manifest, and the manifest

@@ -34,7 +34,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
-from hyperchat import corpus
+from hyperchat import configuration
 from hyperchat.agent import (
     BudgetExceeded,
     NotConfigured,
@@ -42,7 +42,6 @@ from hyperchat.agent import (
     StepLimitExceeded,
     close_model,
     get_model,
-    prompt_sha256,
 )
 from hyperchat.agent import run as run_graph
 from hyperchat.auth import AuthError, Caller, NotAllowedError, UpstreamError, verify_token
@@ -79,12 +78,11 @@ async def lifespan(_app: FastAPI):
     request, so there is nothing to be rejected yet: that failure waits for the first call, where it
     is the 502 any provider failure is.
     """
-    # The contract's identity, once per process. A log line that cannot be tied to the text it was
-    # produced under says nothing about what answered, and the eval records the same hash for the
-    # same reason. `INFO`, so it is visible where the level is at INFO rather than uvicorn's default.
-    logger.info(
-        "agent contract prompt_sha256=%s corpus_sha256=%s", prompt_sha256(), corpus.corpus_sha256()
-    )
+    # What this process will answer with, in the same one-line format the eval writes, so `grep
+    # config` answers "what is running" and "what did this score measure" the same way. `INFO`, so it
+    # is visible where the log level is at INFO rather than uvicorn's default. `overrides` is empty
+    # here and named anyway: an absent field and an empty one read differently to a parser.
+    logger.info("%s", configuration.line("service", overrides=""))
 
     try:
         get_model()
