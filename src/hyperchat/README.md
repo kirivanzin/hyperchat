@@ -26,9 +26,11 @@ returning an empty string, because a 200 with no text is indistinguishable from 
 
 ## Bounds
 
-`PROVIDER_MAX_TOKENS` (default 256) goes on the wire as `max_tokens` — not `max_completion_tokens`,
+`PROVIDER_MAX_TOKENS` (default 640) goes on the wire as `max_tokens` — not `max_completion_tokens`,
 which DeepSeek ignores, and a cap that is silently not applied looks exactly like one that is. It is
-the only bound this repository sets on the output.
+the only bound this repository sets on the output. 640 rather than a sentence-sized 256 because a
+retrieval answer is several paragraphs: at 256 the citation was cut off the end of a real answer, and
+an answer whose citation is missing is an answer from memory by this contract's own rule.
 
 **Wall clock is bounded three times, and each is a decision.** `PROVIDER_TIMEOUT_SECONDS` (default
 20) goes to the client per attempt, so a stalled provider call fails as `ProviderFailed` rather than

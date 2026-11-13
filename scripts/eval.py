@@ -86,10 +86,11 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / "evals" / "cases.jsonl"
 RECORDS = ROOT / "evals" / "results.jsonl"
 
-# `config.py`'s default, repeated here so a run cannot inherit a cap from the shell: a harness whose
-# truncation case depends on the environment is a harness that reports a different score per
-# terminal.
-DEFAULT_MAX_TOKENS = 256
+# `config.py`'s default, repeated here so a run cannot inherit a cap from the shell, and *equal* to it
+# so the eval measures what ships: a per-case override would be a case that passes at a cap nothing
+# serves. A retrieval answer that hits this cap now fails as `finish_reason=length`, which is the
+# signal to raise the default rather than the case.
+DEFAULT_MAX_TOKENS = 640
 
 
 @dataclass(frozen=True)
